@@ -1,0 +1,5 @@
+aiosqlite
+sqlalchemy
+fastapi
+uvicorn
+python-multipart
