@@ -25,7 +25,7 @@ class User(Base):
 
 class ParkingConfig(Base):
     __tablename__ = "parking_configs"
-
+    vehicle_type = Column(String)
     id = Column(Integer, primary_key=True, index=True)
     hour_range = Column(String)  # e.g., "1-2", "2-3"
     price = Column(Float)
@@ -34,7 +34,7 @@ class ParkingConfig(Base):
 
 class ParkingSession(Base):
     __tablename__ = "parking_sessions"
-
+    vehicle_type = Column(String)
     id = Column(Integer, primary_key=True, index=True)
     license_plate = Column(String, index=True)
     time_in = Column(DateTime, default=datetime.utcnow)
