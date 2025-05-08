@@ -17,10 +17,14 @@ yolo_license_plate.conf = 0.60
 prev_frame_time = 0
 new_frame_time = 0
 
-vid = cv2.VideoCapture(1)
+# vid = cv2.VideoCapture(1)
+vid = cv2.VideoCapture(0)
 # vid = cv2.VideoCapture("1.mp4")
 while(True):
-    ret, frame = vid.read()
+    ret, frame = vid.read() 
+    if not ret or frame is None:
+        print("❌ Không đọc được frame từ webcam.")
+        continue  # Bỏ qua vòng lặp này, thử lại frame mới
     
     plates = yolo_LP_detect(frame, size=640)
     list_plates = plates.pandas().xyxy[0].values.tolist()
@@ -42,6 +46,7 @@ while(True):
                 if lp != "unknown":
                     list_read_plates.add(lp)
                     cv2.putText(frame, lp, (int(plate[0]), int(plate[1]-10)), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36,255,12), 2)
+                    print(lp)
                     flag = 1
                     break
             if flag == 1:
