@@ -25,7 +25,7 @@ This repository provides you with a detailed guide on how to training and build 
   python webcam.py 
 
   # run inference on image
-  python lp_image.py -i test_image/3.jpg
+  python lp_image.py -i <path_to_image>
 
   # run LP_recognition.ipynb if you want to know how model work in each step
 ```

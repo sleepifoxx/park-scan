@@ -39,7 +39,7 @@ else:
         crop_img = img[y:y+h, x:x+w]
         cv2.rectangle(img, (int(plate[0]),int(plate[1])), (int(plate[2]),int(plate[3])), color = (0,0,225), thickness = 2)
         cv2.imwrite("images/crops/crop.jpg", crop_img)
-        rc_image = cv2.imread("crop.jpg")
+        rc_image = cv2.imread("images/crops/crop.jpg")
         lp = ""
         for cc in range(0,2):
             for ct in range(0,2):

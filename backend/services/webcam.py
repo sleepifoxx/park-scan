@@ -33,8 +33,8 @@ while(True):
         h = int(plate[3] - plate[1]) # ymax - ymin  
         crop_img = frame[y:y+h, x:x+w]
         cv2.rectangle(frame, (int(plate[0]),int(plate[1])), (int(plate[2]),int(plate[3])), color = (0,0,225), thickness = 2)
-        cv2.imwrite("crop.jpg", crop_img)
-        rc_image = cv2.imread("crop.jpg")
+        cv2.imwrite("images/crops/crop.jpg", crop_img)
+        rc_image = cv2.imread("images/crops/crop.jpg")
         lp = ""
         for cc in range(0,2):
             for ct in range(0,2):
