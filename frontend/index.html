@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Biển số xe</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+        }
+
+        img {
+            border: 2px solid #333;
+            border-radius: 5px;
+        }
+
+        #plate {
+            font-size: 24px;
+            font-weight: bold;
+            margin: 20px;
+            padding: 10px;
+            background-color: #f0f0f0;
+            border-radius: 4px;
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Camera trực tiếp</h2>
+    <img src="http://localhost:8000/video_feed" width="640" height="480" />
+    <h2>Biển số:</h2>
+    <div id="plate">Đang nhận diện...</div>
+
+    <script>
+        setInterval(async () => {
+            try {
+                const res = await fetch("http://localhost:8000/plate");
+                const data = await res.json();
+                document.getElementById("plate").innerText = data.plate;
+            } catch (error) {
+                console.error("Lỗi khi tải biển số:", error);
+            }
+        }, 1000);
+    </script>
+</body>
+
+</html>

@@ -17,3 +17,7 @@ sqlalchemy
 fastapi
 uvicorn
 python-multipart
+pydantic[email]
+python-jose
+passlib>=1.7.4,<2.0
+bcrypt==3.2.0
