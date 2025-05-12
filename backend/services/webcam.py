@@ -39,7 +39,7 @@ yolo_license_plate.conf = 0.60
 # === Constants ===
 CAM_INDEX = 0
 WIDTH, HEIGHT = 640, 480
-FPS_YOLO = 3
+FPS_YOLO = 20
 MOTION_THRESH = 5000
 NO_MOTION_TIME = 1.0
 MIN_DETECT_CNT = 3
