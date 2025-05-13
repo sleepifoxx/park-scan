@@ -8,7 +8,7 @@ import function.helper as helper
 # ====== CẤU HÌNH ======
 CAM_INDEX = 0         # chỉ định camera hoặc file video
 WIDTH, HEIGHT = 640, 480  # độ phân giải capture
-FPS_YOLO = 3         # số lần gọi YOLO trên mỗi giây khi có chuyển động
+FPS_YOLO = 10         # số lần gọi YOLO trên mỗi giây khi có chuyển động
 MOTION_THRESH = 5000      # ngưỡng diện tích contour để coi là chuyển động
 # nếu không có chuyển động liên tiếp trong bao nhiêu giây => kết thúc phiên
 NO_MOTION_TIME = 1.0
