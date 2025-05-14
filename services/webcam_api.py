@@ -10,6 +10,7 @@ import base64
 import function.utils_rotate as utils_rotate
 import function.helper as helper
 import datetime
+import json
 
 app = FastAPI(title="License Plate Recognition API")
 
@@ -23,9 +24,11 @@ app.add_middleware(
 
 # ====== CẤU HÌNH ======
 FPS_YOLO = 3
-MOTION_THRESH = 5000
+MOTION_THRESH = 1000
 NO_MOTION_TIME = 1.0
 MIN_DETECT_CNT = 3
+STANDARD_WIDTH = 640  # Standard width for all processed frames
+STANDARD_HEIGHT = 480  # Standard height for all processed frames
 
 # ====== LOAD YOLO MODEL ======
 print("Loading YOLO models...")
@@ -69,6 +72,19 @@ latest_frame = create_no_signal_frame()
 # ====== HÀM HỖ TRỢ ======
 
 
+def normalize_frame_size(frame):
+    """Ensure all frames have consistent dimensions"""
+    if frame is None:
+        return None
+
+    h, w = frame.shape[:2]
+
+    # Only resize if the dimensions don't match our standard
+    if w != STANDARD_WIDTH or h != STANDARD_HEIGHT:
+        return cv2.resize(frame, (STANDARD_WIDTH, STANDARD_HEIGHT))
+    return frame
+
+
 def read_license_plate(img):
     for cc in range(2):
         for ct in range(2):
@@ -98,13 +114,24 @@ def process_frame(frame):
     if frame is None:
         return None, get_display_plate(), []
 
+    # Normalize frame size before processing
+    frame = normalize_frame_size(frame)
+
     t0 = time.time()
     latest_frame = frame.copy()
 
     # Motion detection
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (21, 21), 0)
+
     if last_gray is None:
+        last_gray = gray
+        return frame, get_display_plate(), []
+
+    # Ensure last_gray has the same dimensions as the current gray frame
+    if last_gray.shape != gray.shape:
+        print(
+            f"[DEBUG] Frame size mismatch: last_gray {last_gray.shape} vs current {gray.shape}")
         last_gray = gray
         return frame, get_display_plate(), []
 
@@ -194,22 +221,26 @@ def generate_frames():
         time_diff = (current_time - last_frame_time).total_seconds()
 
         if latest_frame is not None:
-            # Only show no signal if we've had no frames for a while
-            if time_diff > no_signal_timeout and np.array_equal(latest_frame, create_no_signal_frame()):
-                frame_to_show = create_no_signal_frame()
-                # Add text to indicate no active cameras
-                cv2.putText(frame_to_show, "No active cameras connected", (120, 300),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 1)
-            else:
-                frame_to_show = latest_frame.copy()
+            frame_to_show = latest_frame.copy()
 
-            # Add timestamp and info to the frame
+            # Add timestamp to the frame
             timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
             cv2.putText(frame_to_show, timestamp, (10, frame_to_show.shape[0] - 10),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
 
-            # Add info about when the last frame was received
-            if time_diff > 3:  # Only show staleness warning after 3 seconds
+            # Only show "No signal" message if we've had no frames for a significant time
+            if time_diff > no_signal_timeout:
+                # Instead of completely replacing with no signal frame,
+                # just overlay a status message on the current frame
+                cv2.putText(frame_to_show, "No active camera feed",
+                            (frame_to_show.shape[1]//2 -
+                             150, frame_to_show.shape[0]//2),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
+                cv2.putText(frame_to_show, f"Last frame: {int(time_diff)}s ago",
+                            (frame_to_show.shape[1]//2 - 120,
+                             frame_to_show.shape[0]//2 + 30),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+            elif time_diff > 3:  # Only show staleness warning after 3 seconds
                 status_text = f"Last frame: {int(time_diff)}s ago"
                 cv2.putText(frame_to_show, status_text, (10, 50),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
@@ -240,7 +271,7 @@ async def video_feed():
 @app.get("/get_plate")
 async def get_plate():
     if latest_plate is None:
-        raise HTTPException(status_code=404, detail="No frame processed yet")
+        return {"plate": "No plate detected", "boxes": []}
     return {
         "plate": latest_plate,
         "boxes": latest_boxes
@@ -253,10 +284,6 @@ async def websocket_endpoint(websocket: WebSocket):
     global latest_frame, last_frame_time
     await websocket.accept()
     print("[WS] WebSocket connected.")
-
-    # Reset to the default frame when a new connection is established
-    if latest_frame is None:
-        latest_frame = create_no_signal_frame()
 
     try:
         while True:
@@ -275,19 +302,48 @@ async def websocket_endpoint(websocket: WebSocket):
                 frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
 
                 if frame is not None:
-                    process_frame(frame)
-                    last_frame_time = datetime.datetime.now()  # Update the last frame time
-                    # Add a message to indicate frames are coming from WebSocket
-                    cv2.putText(latest_frame, "Live WebSocket Stream",
-                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    # Log the frame dimensions for debugging
+
+                    # frame_shape = frame.shape
+                    # print(f"[WS] Received frame with shape: {frame_shape}")
+
+                    # Normalize the frame to standard size
+                    frame = normalize_frame_size(frame)
+
+                    # Process the frame and update the timestamp
+                    try:
+                        processed_frame, plate, boxes = process_frame(frame)
+
+                        # Update latest_frame with the processed frame
+                        if processed_frame is not None:
+                            latest_frame = processed_frame
+                            last_frame_time = datetime.datetime.now()
+
+                            # Add a message to indicate frames are coming from WebSocket
+                            cv2.putText(latest_frame, "Live WebSocket Stream",
+                                        (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+                            # Send plate information back to the client
+                            if plate:
+                                await websocket.send_text(json.dumps({
+                                    "plate": plate,
+                                    "boxes": boxes
+                                }))
+                    except Exception as e:
+                        print(f"[WS] Error in process_frame: {str(e)}")
+                        # Reset last_gray to avoid propagating the error
+                        last_gray = None
                 else:
                     print("[WS] Frame decode failed.")
+                    await websocket.send_text(json.dumps({"status": "no_active_feed", "error": "Frame decode failed"}))
             except Exception as e:
                 print(f"[WS] Error processing frame: {e}")
+                await websocket.send_text(json.dumps({"status": "error", "message": str(e)}))
 
     except WebSocketDisconnect:
         print("[WS] WebSocket disconnected.")
-        # Don't reset the frame here - keep the last frame for other viewers
+    except Exception as e:
+        print(f"[WS] Unexpected error in websocket handler: {str(e)}")
 
 
 # ====== CHẠY SERVER ======

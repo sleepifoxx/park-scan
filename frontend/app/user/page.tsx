@@ -1,701 +1,314 @@
-"use client"
+"use client";
 
-import { useState, useEffect, useRef } from "react"
-import { useRouter } from "next/navigation"
-import { useAuth } from "@/context/auth-context"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Badge } from "@/components/ui/badge"
-import { useToast } from "@/components/ui/use-toast"
-import { Camera, Download, Clock, CreditCard, Car, RefreshCw } from "lucide-react"
+import { useState, useEffect, useRef } from "react";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
-// Define API URL - update this to your actual backend URL
-const API_URL = "http://localhost:8000"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
 
-type VehicleRecord = {
-  licensePlate: string
-  entryTime: string
-  exitTime: string | null
-  fee: number | null
-  status: "in" | "out"
-  croppedImageUrl: string
-}
+export default function UserPage() {
+    // State variables
+    const [plateInfo, setPlateInfo] = useState({ plate: "No plate detected", boxes: [] });
+    const [showServerFeed, setShowServerFeed] = useState(true); // Changed from useWebsocket to showServerFeed
+    const [connectionStatus, setConnectionStatus] = useState("Disconnected");
+    const [isLoading, setIsLoading] = useState(true);
+    const [cameraError, setCameraError] = useState<string | null>(null);
+    const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-export default function UserDashboard() {
-  const { user } = useAuth()
-  const router = useRouter()
-  const { toast } = useToast()
-  const videoRef = useRef<HTMLVideoElement>(null)
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-  const wsRef = useRef<WebSocket | null>(null)
-  const frameInterval = useRef<NodeJS.Timeout | null>(null)
-  const [isCameraActive, setIsCameraActive] = useState(false)
-  const [isConnected, setIsConnected] = useState(false)
-  const [isProcessing, setIsProcessing] = useState(false)
-  const [recognizedPlate, setRecognizedPlate] = useState<string | null>(null)
-  const [activeVehicle, setActiveVehicle] = useState<VehicleRecord | null>(null)
-  const [streamMode, setStreamMode] = useState<"local" | "server">("local")
-  const [vehicleRecords, setVehicleRecords] = useState<VehicleRecord[]>([])
+    // References
+    const videoRef = useRef<HTMLVideoElement>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const wsRef = useRef<WebSocket | null>(null);
 
-  // Connection check timer
-  const connectionCheckTimerRef = useRef<NodeJS.Timeout | null>(null)
-
-  useEffect(() => {
-    // Redirect if not logged in
-    if (!user) {
-      router.push("/login")
-    }
-  }, [user, router])
-
-  useEffect(() => {
-    // Start camera automatically when component mounts
-    if (user) {
-      // Increase delay to ensure DOM is fully rendered
-      const timer = setTimeout(() => {
-        console.log("Attempting to start camera after delay");
-        if (videoRef.current) {
-          startCamera();
-        } else {
-          console.error("Video reference not found after initial delay, will retry");
-          // Add another retry with a longer delay
-          const retryTimer = setTimeout(() => {
-            console.log("Retrying camera start");
-            if (videoRef.current) {
-              startCamera();
-            } else {
-              console.error("Video reference still not found after retry");
-              toast({
-                variant: "destructive",
-                title: "Lỗi camera",
-                description: "Không thể khởi tạo kết nối camera. Vui lòng tải lại trang.",
-              });
+    // Fetch plate information periodically (always active regardless of view mode)
+    useEffect(() => {
+        const fetchPlateInfo = async () => {
+            try {
+                const response = await fetch(`${API_BASE_URL}/get_plate`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setPlateInfo(data);
+                    setIsLoading(false);
+                }
+            } catch (error) {
+                console.error("Error fetching plate info:", error);
             }
-          }, 1000);
-          return () => clearTimeout(retryTimer);
-        }
-      }, 800); // Increased from 500ms to 800ms
+        };
 
-      return () => clearTimeout(timer);
-    }
+        fetchPlateInfo();
+        const interval = setInterval(fetchPlateInfo, 2000);
+        return () => clearInterval(interval);
+    }, []);
 
-    // Set up periodic plate fetching
-    const plateCheckInterval = setInterval(fetchLatestPlate, 2000)
+    // Handle WebSocket connection and webcam streaming - now independent of view mode
+    useEffect(() => {
+        // Connect to WebSocket
+        const connectWebSocket = () => {
+            wsRef.current = new WebSocket(`ws://${API_BASE_URL.replace("http://", "")}/ws/stream`);
 
-    return () => {
-      // Clean up on component unmount
-      cleanupResources()
-      clearInterval(plateCheckInterval)
-    }
-  }, [user])
+            wsRef.current.onopen = () => {
+                setConnectionStatus("Connected");
+                setCameraError(null);
+                startWebcam();
+            };
 
-  // Clean up function
-  const cleanupResources = () => {
-    // Stop WebSocket connection
-    if (wsRef.current && isConnected) {
-      wsRef.current.close()
-      wsRef.current = null
-    }
+            wsRef.current.onclose = (event) => {
+                setConnectionStatus("Disconnected");
+                console.log("WebSocket closed:", event);
 
-    // Stop camera stream
-    if (videoRef.current && videoRef.current.srcObject) {
-      const stream = videoRef.current.srcObject as MediaStream
-      stream.getTracks().forEach((track) => track.stop())
-      videoRef.current.srcObject = null
-    }
+                // Try to reconnect after a delay if it was an abnormal closure
+                if (event.code !== 1000 && event.code !== 1001) {
+                    retryTimeoutRef.current = setTimeout(() => {
+                        connectWebSocket();
+                    }, 3000);
+                }
+            };
 
-    // Clear frame sending interval
-    if (frameInterval.current) {
-      clearInterval(frameInterval.current)
-      frameInterval.current = null
-    }
+            wsRef.current.onerror = (error) => {
+                console.error("WebSocket error:", error);
+                setConnectionStatus("Error connecting");
+            };
 
-    // Clear connection check timer
-    if (connectionCheckTimerRef.current) {
-      clearInterval(connectionCheckTimerRef.current)
-      connectionCheckTimerRef.current = null
-    }
+            // Handle messages from server (could include status updates)
+            wsRef.current.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (data.status === "no_active_feed") {
+                        setCameraError("No active camera feed detected on server");
+                    } else if (data.plate) {
+                        setPlateInfo({ plate: data.plate, boxes: data.boxes || [] });
+                    }
+                } catch (e) {
+                    // Not JSON data, probably a pong or other message
+                }
+            };
+        };
 
-    setIsCameraActive(false)
-    setIsConnected(false)
-  }
+        // Initial WebSocket connection
+        connectWebSocket();
 
-  // Connect to WebSocket
-  const connectWebSocket = () => {
-    try {
-      const ws = new WebSocket(`ws://${API_URL.replace(/^https?:\/\//, '')}/ws/stream`)
+        // Send heartbeat every 30 seconds to keep connection alive
+        const heartbeatInterval = setInterval(() => {
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                wsRef.current.send("heartbeat");
+            }
+        }, 30000);
 
-      ws.onopen = () => {
-        console.log("WebSocket connected")
-        setIsConnected(true)
-        toast({
-          title: "Kết nối thành công",
-          description: "Đã kết nối tới máy chủ nhận diện biển số",
-        })
-      }
+        return () => {
+            clearInterval(heartbeatInterval);
+            if (wsRef.current) {
+                wsRef.current.close();
+            }
 
-      ws.onclose = () => {
-        console.log("WebSocket disconnected")
-        setIsConnected(false)
+            // Stop webcam
+            if (videoRef.current && videoRef.current.srcObject) {
+                const tracks = (videoRef.current.srcObject as MediaStream).getTracks();
+                tracks.forEach(track => track.stop());
+            }
 
-        // Attempt to reconnect after a delay
-        setTimeout(() => {
-          if (isCameraActive) {
-            connectWebSocket()
-          }
-        }, 3000)
-      }
+            // Clear any pending retry timeouts
+            if (retryTimeoutRef.current) {
+                clearTimeout(retryTimeoutRef.current);
+                retryTimeoutRef.current = null;
+            }
+        };
+    }, [API_BASE_URL]); // Only depends on API_BASE_URL, not on view mode
 
-      ws.onerror = (error) => {
-        console.error("WebSocket error:", error)
-        toast({
-          variant: "destructive",
-          title: "Lỗi kết nối",
-          description: "Không thể kết nối đến máy chủ xử lý biển số",
-        })
-        setIsConnected(false)
-      }
-
-      wsRef.current = ws
-
-      // Start connection check timer
-      if (connectionCheckTimerRef.current) {
-        clearInterval(connectionCheckTimerRef.current)
-      }
-
-      connectionCheckTimerRef.current = setInterval(() => {
-        if (ws.readyState !== WebSocket.OPEN) {
-          setIsConnected(false)
-        }
-      }, 5000)
-    } catch (error) {
-      console.error("Error creating WebSocket:", error)
-      setIsConnected(false)
-    }
-  }
-
-  // Start the camera
-  const startCamera = async () => {
-    try {
-      console.log("StartCamera called, videoRef exists:", !!videoRef.current);
-
-      // Safety check - if somehow we got here without a video reference
-      if (!videoRef.current) {
-        console.error("Video reference is null in startCamera");
-        toast({
-          variant: "destructive",
-          title: "Lỗi camera",
-          description: "Không thể tìm thấy thẻ video. Vui lòng tải lại trang.",
-        });
-        return; // Exit function instead of throwing
-      }
-
-      // First, clean up any existing streams
-      if (videoRef.current.srcObject) {
-        const oldStream = videoRef.current.srcObject as MediaStream;
-        oldStream.getTracks().forEach(track => track.stop());
-        videoRef.current.srcObject = null;
-      }
-
-      console.log("Requesting camera access...")
-      // Request camera access
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: "environment",
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        audio: false
-      })
-
-      if (videoRef.current) {
-        console.log("Setting video stream to video element...")
-        // Set the stream to the video element
-        videoRef.current.srcObject = stream
-
-        // Force the video to play immediately
+    // Function to start webcam and send frames
+    const startWebcam = async () => {
         try {
-          await videoRef.current.play()
-          console.log("Video playback started successfully")
-          setIsCameraActive(true)
+            // Clear any previous error
+            setCameraError(null);
 
-          // Connect to WebSocket after camera is confirmed working
-          connectWebSocket()
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: { width: 640, height: 480 }
+            });
 
-          // Start sending frames after video is playing
-          startSendingFrames()
-        } catch (err) {
-          console.error("Error playing video:", err)
-          toast({
-            variant: "destructive",
-            title: "Lỗi phát video",
-            description: "Không thể phát video từ camera. Vui lòng thử lại.",
-          })
-        }
-      } else {
-        throw new Error("Video reference not found")
-      }
-    } catch (error) {
-      console.error("Error in startCamera:", error)
-      toast({
-        variant: "destructive",
-        title: "Lỗi camera",
-        description: "Không thể truy cập camera. Vui lòng kiểm tra quyền truy cập.",
-      })
-    }
-  }
-
-  // Restart the camera
-  const restartCamera = async () => {
-    console.log("Restarting camera...")
-    cleanupResources()
-    // Add a small delay before restarting
-    setTimeout(() => {
-      startCamera()
-    }, 500)
-  }
-
-  // Start camera in background (for server mode)
-  const startBackgroundCamera = async () => {
-    try {
-      console.log("Starting camera in background mode...")
-
-      // Safety check for videoRef
-      if (!videoRef.current) {
-        console.error("Video reference is null in startBackgroundCamera");
-        toast({
-          variant: "destructive",
-          title: "Lỗi camera",
-          description: "Không thể tìm thấy thẻ video trong chế độ nền.",
-        });
-        return;
-      }
-
-      // First, clean up any existing streams
-      if (videoRef.current.srcObject) {
-        const oldStream = videoRef.current.srcObject as MediaStream
-        oldStream.getTracks().forEach(track => track.stop())
-        videoRef.current.srcObject = null
-      }
-
-      // Request camera access
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: "environment",
-          width: { ideal: 640 }, // Lower resolution for background mode
-          height: { ideal: 480 }
-        },
-        audio: false
-      })
-
-      if (videoRef.current) {
-        // Set the stream to the video element (but don't display it)
-        videoRef.current.srcObject = stream
-
-        try {
-          await videoRef.current.play()
-          console.log("Background video playback started")
-          setIsCameraActive(true)
-
-          // Connect to WebSocket
-          connectWebSocket()
-
-          // Start sending frames
-          startSendingFrames()
-        } catch (err) {
-          console.error("Error playing background video:", err)
-        }
-      }
-    } catch (error) {
-      console.error("Error accessing background camera:", error)
-    }
-  }
-
-  // Toggle stream mode between local camera and server stream
-  const toggleStreamMode = () => {
-    const newMode = streamMode === "local" ? "server" : "local"
-    setStreamMode(newMode)
-    if (newMode === "local") {
-      if (!isCameraActive) restartCamera()
-    } else {
-      if (!isConnected) connectWebSocket()
-      if (!isCameraActive) startBackgroundCamera()
-    }
-  }
-
-  // Send frames to server via WebSocket
-  const startSendingFrames = () => {
-    // Clear any existing interval first
-    if (frameInterval.current) {
-      clearInterval(frameInterval.current)
-      frameInterval.current = null
-    }
-
-    frameInterval.current = setInterval(() => {
-      // We want to send frames regardless of streamMode now
-      if (!isCameraActive || !isConnected ||
-        !videoRef.current || !canvasRef.current ||
-        !videoRef.current.srcObject) {
-        return
-      }
-
-      const video = videoRef.current
-      const canvas = canvasRef.current
-
-      // Set canvas dimensions to match video
-      canvas.width = video.videoWidth || 640
-      canvas.height = video.videoHeight || 480
-
-      // Check if video is actually playing and has dimensions
-      if (video.videoWidth === 0 || video.videoHeight === 0) {
-        console.log("Video not ready yet, dimensions:", video.videoWidth, video.videoHeight)
-        return
-      }
-
-      // Draw video frame to canvas
-      const ctx = canvas.getContext("2d")
-      if (ctx && video.readyState === video.HAVE_ENOUGH_DATA) {
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height)
-
-        // Convert canvas to base64 JPEG
-        try {
-          const imageDataUrl = canvas.toDataURL("image/jpeg", 0.7)
-
-          // Send to WebSocket if connected
-          if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-            wsRef.current.send(imageDataUrl)
-          }
+            if (videoRef.current) {
+                videoRef.current.srcObject = stream;
+                videoRef.current.onloadedmetadata = () => {
+                    // Start sending frames once video is ready
+                    if (videoRef.current) videoRef.current.play();
+                    sendFrames();
+                };
+            }
         } catch (error) {
-          console.error("Error converting/sending frame:", error)
+            console.error("Error accessing webcam:", error);
+            setCameraError("Camera access denied or device not available");
+            setConnectionStatus("Webcam access denied");
+
+            // Set a timer to retry camera access
+            retryTimeoutRef.current = setTimeout(() => {
+                if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    console.log("Retrying camera access...");
+                    startWebcam();
+                }
+            }, 5000);
         }
-      }
-    }, 333) // ~3 FPS to match FPS_YOLO setting in backend
+    };
 
-    return () => {
-      if (frameInterval.current) {
-        clearInterval(frameInterval.current)
-        frameInterval.current = null
-      }
-    }
-  }
+    // Function to send frames to the WebSocket
+    const sendFrames = () => {
+        if (!canvasRef.current || !videoRef.current || !wsRef.current) return;
 
-  // Fetch latest plate from API
-  const fetchLatestPlate = async () => {
-    try {
-      const response = await fetch(`${API_URL}/get_plate`)
-      if (!response.ok) {
-        throw new Error(`HTTP error! Status: ${response.status}`)
-      }
+        const ctx = canvasRef.current.getContext('2d');
+        if (!ctx) return;
 
-      const data = await response.json()
+        let frameCount = 0;
+        let lastErrorTime = 0;
 
-      if (data && data.plate && data.plate !== "unknown" && data.plate !== recognizedPlate) {
-        // We have a new plate
-        handleNewPlate(data.plate, data.boxes)
-      }
-    } catch (error) {
-      console.error("Error fetching plate:", error)
-    }
-  }
+        const sendFrame = () => {
+            if (
+                videoRef.current &&
+                wsRef.current &&
+                wsRef.current.readyState === WebSocket.OPEN &&
+                videoRef.current.videoWidth > 0
+            ) {
+                try {
+                    // Draw video frame to canvas
+                    ctx.drawImage(
+                        videoRef.current,
+                        0, 0,
+                        canvasRef.current!.width,
+                        canvasRef.current!.height
+                    );
 
-  // Handle newly detected plate
-  const handleNewPlate = (plate: string, boxes: any[]) => {
-    setRecognizedPlate(plate)
+                    // Get frame as base64 JPEG
+                    const dataUrl = canvasRef.current!.toDataURL('image/jpeg', 0.7);
 
-    // Create a placeholder image URL (in real app, you'd use the cropped image from boxes)
-    let croppedImageUrl = "/placeholder.svg?height=150&width=300"
+                    // Send to WebSocket
+                    wsRef.current.send(dataUrl);
 
-    // Create a new vehicle record
-    const currentTime = new Date()
-    const timeString = currentTime.toISOString().replace("T", " ").substring(0, 19)
+                    // Clear any camera error since we successfully sent a frame
+                    if (cameraError) setCameraError(null);
 
-    // Check if this plate is already in the system as "in"
-    const existingActiveVehicle = vehicleRecords.find(
-      record => record.licensePlate === plate && record.status === "in"
-    )
+                    frameCount++;
+                    if (frameCount % 30 === 0) {
+                        console.log(`Sent ${frameCount} frames`);
+                    }
+                } catch (error) {
+                    // Don't spam console with errors
+                    const now = Date.now();
+                    if (now - lastErrorTime > 5000) {
+                        console.error("Error sending frame:", error);
+                        lastErrorTime = now;
+                    }
+                }
+            }
 
-    if (!existingActiveVehicle) {
-      // New vehicle entering
-      const newVehicle: VehicleRecord = {
-        licensePlate: plate,
-        entryTime: timeString,
-        exitTime: null,
-        fee: null,
-        status: "in",
-        croppedImageUrl: croppedImageUrl,
-      }
+            // Schedule next frame if websocket is still open
+            if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+                setTimeout(sendFrame, 100); // Send at approximately 10 FPS
+            }
+        };
 
-      setActiveVehicle(newVehicle)
-      setVehicleRecords(prev => [newVehicle, ...prev])
+        // Start the sending loop
+        sendFrame();
+    };
 
-      toast({
-        title: "Nhận diện thành công",
-        description: `Đã nhận diện biển số: ${plate}`,
-      })
-    } else {
-      // Already in system, just update active vehicle
-      setActiveVehicle(existingActiveVehicle)
-    }
-  }
+    // Handle toggling between server feed and device camera view
+    const handleToggleView = (checked: boolean) => {
+        setShowServerFeed(!checked); // Invert the logic: checked means show device camera
+    };
 
-  // Manual capture for testing
-  const handleManualCapture = () => {
-    setIsProcessing(true)
+    return (
+        <div className="container mx-auto p-4">
+            <h1 className="text-3xl font-bold mb-6">License Plate Recognition</h1>
 
-    setTimeout(() => {
-      fetchLatestPlate()
-      setIsProcessing(false)
-    }, 2000)
-  }
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Video Feed</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="mb-4 flex items-center space-x-2">
+                            <Switch
+                                id="camera-mode"
+                                checked={!showServerFeed} // Invert the check state
+                                onCheckedChange={handleToggleView}
+                            />
+                            <label htmlFor="camera-mode">
+                                {showServerFeed ? "Show my camera view" : "Show server processed view"}
+                            </label>
 
-  // Handle vehicle checkout
-  const handleCheckout = (licensePlate: string) => {
-    setVehicleRecords((prev) =>
-      prev.map((record) => {
-        if (record.licensePlate === licensePlate && record.status === "in") {
-          const exitTime = new Date().toISOString().replace("T", " ").substring(0, 19)
-          // Calculate fee based on time difference
-          const entryDate = new Date(record.entryTime)
-          const exitDate = new Date()
-          const hoursDiff = (exitDate.getTime() - entryDate.getTime()) / (1000 * 60 * 60)
-          const fee = Math.ceil(hoursDiff * 25000) // 25,000 VND per hour
-
-          return {
-            ...record,
-            exitTime,
-            fee,
-            status: "out" as const,
-          }
-        }
-        return record
-      }),
-    )
-
-    toast({
-      title: "Thanh toán thành công",
-      description: `Xe biển số ${licensePlate} đã được thanh toán và xuất bãi`,
-    })
-  }
-
-  // Generate invoice
-  const generateInvoice = (record: VehicleRecord) => {
-    toast({
-      title: "Đang xuất hóa đơn",
-      description: `Hóa đơn cho xe biển số ${record.licensePlate} đang được tạo`,
-    })
-    // In a real app, this would generate and download a PDF invoice
-  }
-
-  if (!user) {
-    return null // Don't render anything until we check authentication
-  }
-
-  return (
-    <div className="container py-8">
-      <h1 className="text-3xl font-bold mb-8">Hệ Thống Quản Lý Bãi Xe</h1>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-        {/* Camera Section - Stream from server or local camera */}
-        <div className="lg:col-span-2 space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center justify-between">
-                <div className="flex items-center">
-                  <Camera className="mr-2 h-5 w-5" />
-                  {streamMode === "local" ? "Camera Trực Tiếp" : "Luồng Video Từ Máy Chủ"}
-                </div>
-                <Badge variant={isConnected ? "default" : "destructive"}>
-                  {isConnected ? "Đã Kết Nối" : "Mất Kết Nối"}
-                </Badge>
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-4">
-                <div className="relative aspect-video bg-muted rounded-md overflow-hidden">
-                  {streamMode === "local" ? (
-                    <video
-                      ref={videoRef}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <video
-                      key="server-video"
-                      src={`${API_URL}/video_feed`}
-                      autoPlay
-                      playsInline
-                      muted
-                      className="w-full h-full object-cover"
-                      onError={() => {
-                        toast({
-                          variant: "destructive",
-                          title: "Lỗi luồng máy chủ",
-                          description: "Không thể tải luồng video từ máy chủ.",
-                        })
-                      }}
-                    />
-                  )}
-
-                  {isProcessing && (
-                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                      <div className="text-white text-center">
-                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-white mb-4"></div>
-                        <p>Đang xử lý...</p>
-                      </div>
-                    </div>
-                  )}
-
-                  <canvas ref={canvasRef} className="hidden" />
-                </div>
-                <div className="flex justify-center gap-4">
-                  <Button variant="outline" onClick={restartCamera} disabled={isProcessing}>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Khởi động lại kết nối
-                  </Button>
-                  <Button variant="outline" onClick={toggleStreamMode} disabled={isProcessing}>
-                    <Camera className="mr-2 h-4 w-4" />
-                    {streamMode === "local" ? "Xem từ máy chủ" : "Xem camera trực tiếp"}
-                  </Button>
-                  <Button onClick={handleManualCapture} disabled={isProcessing || !isConnected}>
-                    <Camera className="mr-2 h-4 w-4" />
-                    Nhận diện thủ công
-                  </Button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* License Plate Information */}
-          {activeVehicle && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Car className="mr-2 h-5 w-5" />
-                  Thông tin biển số xe
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-col md:flex-row gap-6 items-center">
-                  <div className="relative w-full max-w-xs">
-                    <img
-                      src={activeVehicle.croppedImageUrl || "/placeholder.svg"}
-                      alt="Biển số xe"
-                      className="w-full h-auto rounded-md border"
-                    />
-                  </div>
-                  <div className="space-y-4 flex-1">
-                    <div>
-                      <p className="text-sm text-muted-foreground">Biển số xe:</p>
-                      <p className="text-3xl font-bold font-mono">{activeVehicle.licensePlate}</p>
-                    </div>
-                    <div className="flex flex-col gap-2">
-                      <div className="flex items-center">
-                        <Clock className="h-4 w-4 mr-2 text-muted-foreground" />
-                        <span className="text-sm">Thời gian vào: {activeVehicle.entryTime}</span>
-                      </div>
-                      {activeVehicle.exitTime && (
-                        <div className="flex items-center">
-                          <Clock className="h-4 w-4 mr-2 text-muted-foreground" />
-                          <span className="text-sm">Thời gian ra: {activeVehicle.exitTime}</span>
+                            <span className={`ml-4 text-sm ${connectionStatus === "Connected" ? "text-green-500" : "text-red-500"
+                                }`}>
+                                WebSocket: {connectionStatus}
+                            </span>
                         </div>
-                      )}
-                      {activeVehicle.fee && (
-                        <div className="flex items-center">
-                          <CreditCard className="h-4 w-4 mr-2 text-muted-foreground" />
-                          <span className="text-sm">Phí dịch vụ: {activeVehicle.fee.toLocaleString("vi-VN")} VNĐ</span>
+
+                        {cameraError && (
+                            <div className="mb-4 p-3 bg-red-50 border border-red-100 text-red-700 rounded">
+                                <p className="font-semibold">{cameraError}</p>
+                                <p className="text-sm mt-1">
+                                    Check your camera permissions or try restarting your browser.
+                                </p>
+                            </div>
+                        )}
+
+                        <div className="video-container relative">
+                            {/* Always render both, but only show the one that's active */}
+                            <video
+                                ref={videoRef}
+                                autoPlay
+                                playsInline
+                                muted
+                                className={`w-full h-auto border rounded ${showServerFeed ? 'hidden' : 'block'}`}
+                            ></video>
+
+                            <img
+                                src={`${API_BASE_URL}/video_feed`}
+                                alt="Server Video Feed"
+                                className={`w-full h-auto border rounded ${showServerFeed ? 'block' : 'hidden'}`}
+                                onError={() => setCameraError("Server camera feed unavailable")}
+                            />
+
+                            <canvas
+                                ref={canvasRef}
+                                width="640"
+                                height="480"
+                                className="hidden"
+                            ></canvas>
+
+                            <div className="absolute top-2 right-2 bg-black bg-opacity-50 text-white px-2 py-1 rounded text-sm">
+                                {showServerFeed ? "Server Stream" : "Local Camera"}
+                            </div>
                         </div>
-                      )}
-                    </div>
-                    <div className="flex gap-2">
-                      {activeVehicle.status === "in" ? (
-                        <Button onClick={() => handleCheckout(activeVehicle.licensePlate)}>
-                          Thanh Toán & Xuất Bãi
-                        </Button>
-                      ) : (
-                        <Button variant="outline" onClick={() => generateInvoice(activeVehicle)}>
-                          <Download className="mr-2 h-4 w-4" />
-                          Xuất Hóa Đơn
-                        </Button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          )}
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Detected License Plate</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="plate-display p-6 border rounded bg-gray-50 text-center mb-4">
+                            {isLoading ? (
+                                <p>Loading plate information...</p>
+                            ) : (
+                                <h3 className="text-4xl font-bold">{plateInfo.plate}</h3>
+                            )}
+                        </div>
+
+                        <div className="mt-6">
+                            <h3 className="text-xl font-semibold mb-2">Detection Details</h3>
+                            {plateInfo.boxes && plateInfo.boxes.length > 0 ? (
+                                <div className="space-y-2">
+                                    {plateInfo.boxes.map((box: any, index: number) => (
+                                        <div key={index} className="p-3 bg-gray-100 rounded">
+                                            <p><strong>Plate:</strong> {box.plate}</p>
+                                            <p><strong>Position:</strong> x:{box.x}, y:{box.y}, w:{box.w}, h:{box.h}</p>
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-gray-500">No detection details available</p>
+                            )}
+                        </div>
+                    </CardContent>
+                </Card>
+            </div>
         </div>
-
-        {/* Vehicle Records */}
-        <div>
-          <Card className="h-full">
-            <CardHeader>
-              <CardTitle>Lịch Sử Xe Ra Vào</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Tabs defaultValue="in">
-                <TabsList className="grid w-full grid-cols-2 mb-4">
-                  <TabsTrigger value="in">Xe Trong Bãi</TabsTrigger>
-                  <TabsTrigger value="out">Xe Đã Ra</TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="in" className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
-                  {vehicleRecords.filter((record) => record.status === "in").length === 0 ? (
-                    <p className="text-center text-muted-foreground py-8">Không có xe trong bãi</p>
-                  ) : (
-                    vehicleRecords
-                      .filter((record) => record.status === "in")
-                      .map((record) => (
-                        <div key={record.licensePlate} className="border rounded-lg p-4 space-y-2">
-                          <div className="flex justify-between items-center">
-                            <p className="font-bold">{record.licensePlate}</p>
-                            <Badge>Đang trong bãi</Badge>
-                          </div>
-                          <p className="text-sm text-muted-foreground">Vào: {record.entryTime}</p>
-                          <Button size="sm" className="w-full" onClick={() => handleCheckout(record.licensePlate)}>
-                            Thanh Toán & Xuất Bãi
-                          </Button>
-                        </div>
-                      ))
-                  )}
-                </TabsContent>
-
-                <TabsContent value="out" className="space-y-4 max-h-[600px] overflow-y-auto pr-2">
-                  {vehicleRecords.filter((record) => record.status === "out").length === 0 ? (
-                    <p className="text-center text-muted-foreground py-8">Không có lịch sử xe ra</p>
-                  ) : (
-                    vehicleRecords
-                      .filter((record) => record.status === "out")
-                      .map((record) => (
-                        <div key={record.licensePlate} className="border rounded-lg p-4 space-y-2">
-                          <div className="flex justify-between items-center">
-                            <p className="font-bold">{record.licensePlate}</p>
-                            <Badge variant="outline">Đã ra bãi</Badge>
-                          </div>
-                          <div className="text-sm space-y-1">
-                            <p className="text-muted-foreground">Vào: {record.entryTime}</p>
-                            <p className="text-muted-foreground">Ra: {record.exitTime}</p>
-                            <p>Phí: {record.fee?.toLocaleString("vi-VN")} VNĐ</p>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="w-full"
-                            onClick={() => generateInvoice(record)}
-                          >
-                            <Download className="mr-2 h-4 w-4" />
-                            Xuất Hóa Đơn
-                          </Button>
-                        </div>
-                      ))
-                  )}
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
-        </div >
-      </div >
-    </div >
-  )
+    );
 }
