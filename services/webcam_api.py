@@ -1,10 +1,11 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import FastAPI, UploadFile, File, HTTPException, Response
+from fastapi.responses import StreamingResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import torch
 import time
 import collections
+from collections import deque
 import numpy as np
 import base64
 import io
@@ -53,9 +54,9 @@ plate_counter = collections.Counter()
 session_active = False
 current_frame = None
 latest_plate = None
-latest_boxes = []
-plate_history = []         # Lưu lịch sử các biển số đã xác thực
+plate_history = []      # Lưu lịch sử các biển số đã xác thực
 current_session_plate = None  # Biển số đang được theo dõi trong session hiện tại
+latest_boxes = []  # Biển số mới nhất phát hiện được trong frame hiện tại
 
 # ====== HÀM HỖ TRỢ ======
 
@@ -149,6 +150,8 @@ def process_frame(frame):
                 plate, cnt = plate_counter.most_common(1)[0]
                 if cnt >= MIN_DETECT_CNT and plate != "unknown":
                     latest_plate = plate
+                    with open("plate.txt", "a") as f:
+                        f.write(f"{plate}\n")
                     # Thêm vào lịch sử nếu chưa tồn tại hoặc khác với biển số cuối cùng
                     if not plate_history or plate_history[-1] != plate:
                         plate_history.append(plate)
@@ -216,33 +219,6 @@ def process_frame(frame):
     return frame, get_display_plate(), boxes
 
 
-@app.post("/upload_frame")
-async def upload_frame(file: UploadFile = File(...)):
-    """Upload and process a single frame"""
-    contents = await file.read()
-
-    # Convert the uploaded image to OpenCV format
-    nparr = np.frombuffer(contents, np.uint8)
-    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
-    if frame is None:
-        raise HTTPException(status_code=400, detail="Invalid image format")
-
-    processed_frame, display_plate, boxes = process_frame(frame)
-
-    _, img_encoded = cv2.imencode('.jpg', processed_frame)
-
-    response = {
-        "success": True,
-        "plate": display_plate,
-        "boxes": boxes if boxes else latest_boxes,
-        "frame": base64.b64encode(img_encoded).decode('utf-8'),
-        "history": plate_history  # Thêm lịch sử biển số vào response
-    }
-
-    return response
-
-
 def generate_frames():
     """Generate frames for video streaming"""
     while True:
@@ -252,29 +228,44 @@ def generate_frames():
                 _, buffer = cv2.imencode('.jpg', processed_frame)
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-        time.sleep(0.05)  # Add a small delay to reduce CPU usage
+        time.sleep(0.01)  # Add a small delay to reduce CPU usage
+
+
+@app.post("/upload_frame")
+async def upload_frame(file: UploadFile = File(...)):
+    contents = await file.read()
+    nparr = np.frombuffer(contents, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if frame is None:
+        raise HTTPException(status_code=400, detail="Invalid image format")
+
+    global latest_frame, latest_plate, latest_boxes
+    processed_frame, display_plate, boxes = process_frame(frame)
+    latest_frame = processed_frame
+    latest_plate = display_plate
+    latest_boxes = boxes
+
+    # Return no content, backend just stores the frame
+    return Response(status_code=204)
 
 
 @app.get("/video_feed")
 async def video_feed():
-    """Video streaming endpoint"""
     return StreamingResponse(
         generate_frames(),
-        media_type="multipart/x-mixed-replace; boundary=frame"
+        media_type='multipart/x-mixed-replace; boundary=frame'
     )
 
 
 @app.get("/get_plate")
 async def get_plate():
-    """Get the latest detected license plate"""
+    if latest_plate is None:
+        raise HTTPException(status_code=404, detail="No frame processed yet")
     return {
-        "plate": get_display_plate(),
-        "boxes": latest_boxes,
-        "history": plate_history  # Thêm lịch sử biển số vào response
+        "plate": latest_plate,
+        "boxes": latest_boxes
     }
-
 
 if __name__ == "__main__":
     import uvicorn
-    print("Starting License Plate Recognition API server...")
     uvicorn.run(app, host="0.0.0.0", port=8000)
