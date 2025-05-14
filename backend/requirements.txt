@@ -15,7 +15,7 @@ setuptools
 aiosqlite
 sqlalchemy
 fastapi
-uvicorn
+uvicorn[standard]
 python-multipart
 pydantic[email]
 python-jose

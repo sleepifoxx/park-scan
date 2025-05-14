@@ -1,17 +1,15 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Response
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 import cv2
 import torch
 import time
 import collections
-from collections import deque
 import numpy as np
 import base64
-import io
-from PIL import Image
 import function.utils_rotate as utils_rotate
 import function.helper as helper
+import datetime
 
 app = FastAPI(title="License Plate Recognition API")
 
@@ -24,25 +22,17 @@ app.add_middleware(
 )
 
 # ====== CẤU HÌNH ======
-WIDTH, HEIGHT = 640, 480  # độ phân giải capture
-FPS_YOLO = 3              # số lần gọi YOLO trên mỗi giây khi có chuyển động
-MOTION_THRESH = 5000      # ngưỡng diện tích contour để coi là chuyển động
-# nếu không có chuyển động liên tiếp trong bao nhiêu giây => kết thúc phiên
+FPS_YOLO = 3
+MOTION_THRESH = 5000
 NO_MOTION_TIME = 1.0
-MIN_DETECT_CNT = 3        # số lần tối thiểu để coi là "xác thực" biển
+MIN_DETECT_CNT = 3
 
-# ====== NẠP MODEL YOLO ======
+# ====== LOAD YOLO MODEL ======
 print("Loading YOLO models...")
-yolo_LP_detect = torch.hub.load(
-    'yolov5', 'custom',
-    path='model/LP_detector_nano_61.pt',
-    force_reload=True, source='local'
-)
-yolo_license_plate = torch.hub.load(
-    'yolov5', 'custom',
-    path='model/LP_ocr_nano_62.pt',
-    force_reload=True, source='local'
-)
+yolo_LP_detect = torch.hub.load('yolov5', 'custom', path='model/LP_detector_nano_61.pt',
+                                force_reload=True, source='local')
+yolo_license_plate = torch.hub.load('yolov5', 'custom', path='model/LP_ocr_nano_62.pt',
+                                    force_reload=True, source='local')
 yolo_license_plate.conf = 0.60
 
 # ====== BIẾN TOÀN CỤC ======
@@ -52,17 +42,34 @@ last_motion = 0
 yolo_last_time = 0
 plate_counter = collections.Counter()
 session_active = False
-current_frame = None
+latest_frame = None
 latest_plate = None
-plate_history = []      # Lưu lịch sử các biển số đã xác thực
-current_session_plate = None  # Biển số đang được theo dõi trong session hiện tại
-latest_boxes = []  # Biển số mới nhất phát hiện được trong frame hiện tại
+plate_history = []
+current_session_plate = None
+latest_boxes = []
+last_frame_time = datetime.datetime.now()
+no_signal_timeout = 10  # seconds before showing no signal
+
+# Create a default "No Signal" frame to display when no frames are available
+
+
+def create_no_signal_frame():
+    # Create a black image with text
+    frame = np.zeros((480, 640, 3), np.uint8)
+    cv2.putText(frame, "No video signal", (180, 240),
+                cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
+    cv2.putText(frame, "Waiting for camera connection...", (120, 270),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 1)
+    return frame
+
+
+# Initialize with a no signal frame
+latest_frame = create_no_signal_frame()
 
 # ====== HÀM HỖ TRỢ ======
 
 
 def read_license_plate(img):
-    """Thử deskew nhiều hướng, trả về lần đọc đầu tiên != 'unknown'"""
     for cc in range(2):
         for ct in range(2):
             txt = helper.read_plate(
@@ -74,27 +81,7 @@ def read_license_plate(img):
     return "unknown"
 
 
-def calculate_iou(b1, b2):
-    """Tính IoU giữa 2 box [x,y,w,h]"""
-    x1, y1, w1, h1 = b1
-    x2, y2, w2, h2 = b2
-    xa = max(x1, x2)
-    ya = max(y1, y2)
-    xb = min(x1+w1, x2+w2)
-    yb = min(y1+h1, y2+h2)
-    if xb < xa or yb < ya:
-        return 0.0
-    inter = (xb-xa)*(yb-ya)
-    return inter / float(w1*h1 + w2*h2 - inter)
-
-
 def get_display_plate():
-    """Lấy biển số ổn định nhất để hiển thị cho người dùng"""
-    # Ưu tiên theo thứ tự:
-    # 1. Biển số đã xác thực trong session hiện tại (current_session_plate)
-    # 2. Biển số mới nhất đã xác thực (latest_plate)
-    # 3. Biển số "No plate detected" nếu không có gì
-
     if current_session_plate and current_session_plate != "unknown":
         return current_session_plate
     elif latest_plate and latest_plate != "unknown":
@@ -104,18 +91,17 @@ def get_display_plate():
 
 
 def process_frame(frame):
-    """Process a single frame for motion detection and license plate recognition"""
     global last_gray, motion_start, last_motion, yolo_last_time
-    global plate_counter, session_active, current_frame
+    global plate_counter, session_active, latest_frame
     global latest_plate, latest_boxes, current_session_plate
 
     if frame is None:
         return None, get_display_plate(), []
 
     t0 = time.time()
-    current_frame = frame.copy()
+    latest_frame = frame.copy()
 
-    # --- 1. Phát hiện chuyển động ---
+    # Motion detection
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (21, 21), 0)
     if last_gray is None:
@@ -133,17 +119,14 @@ def process_frame(frame):
     now = time.time()
 
     if motion:
-        # nếu mới bắt đầu session
         if not session_active:
             session_active = True
             motion_start = now
             plate_counter.clear()
             current_session_plate = None
-            print(
-                f"[{time.strftime('%H:%M:%S')}] Phát hiện chuyển động, bắt đầu phiên đọc biển số.")
+            print(f"[{time.strftime('%H:%M:%S')}] Motion detected. Start session.")
         last_motion = now
     else:
-        # nếu đã có session và quá NO_MOTION_TIME không có motion => kết thúc session
         if session_active and (now - last_motion) > NO_MOTION_TIME:
             session_active = False
             if plate_counter:
@@ -152,101 +135,98 @@ def process_frame(frame):
                     latest_plate = plate
                     with open("plate.txt", "a") as f:
                         f.write(f"{plate}\n")
-                    # Thêm vào lịch sử nếu chưa tồn tại hoặc khác với biển số cuối cùng
                     if not plate_history or plate_history[-1] != plate:
                         plate_history.append(plate)
-                        # Giữ lịch sử ở mức tối đa 10 biển số
                         if len(plate_history) > 10:
                             plate_history.pop(0)
-
                     print(
-                        f"[{time.strftime('%H:%M:%S')}] Kết thúc session. Biển số xác thực: {plate} ({cnt} lần).")
+                        f"[{time.strftime('%H:%M:%S')}] Session ended. Plate: {plate} ({cnt} times).")
             else:
                 print(
-                    f"[{time.strftime('%H:%M:%S')}] Kết thúc session. Không đọc được biển hợp lệ.")
+                    f"[{time.strftime('%H:%M:%S')}] Session ended. No valid plate.")
 
-            # Reset các biến của session
             plate_counter.clear()
             current_session_plate = None
 
-    # Khởi tạo boxes cho frame hiện tại
     boxes = []
-    frame_plate = None  # Biển số được phát hiện trong frame hiện tại
 
-    # --- 2. Nếu đang session (có motion), chạy YOLO ở FPS cố định ---
     if session_active and (now - yolo_last_time) >= 1.0 / FPS_YOLO:
         yolo_last_time = now
-
         results = yolo_LP_detect(frame, size=640)
         detection_boxes = results.pandas().xyxy[0].values.tolist()
 
         for b in detection_boxes:
             x1, y1, x2, y2, _, _, _ = b
-            x, y, w, h = int(x1), int(y1), int(x2-x1), int(y2-y1)
-            crop = frame[y:y+h, x:x+w]
+            x, y, w, h = int(x1), int(y1), int(x2 - x1), int(y2 - y1)
+            crop = frame[y:y + h, x:x + w]
             plate = read_license_plate(crop)
             plate_counter[plate] += 1
 
-            # Nếu đọc được biển hợp lệ, cập nhật biển số hiện tại của session
             if plate != "unknown":
-                frame_plate = plate
-                # Nếu biển số hợp lệ và đã phát hiện >= MIN_DETECT_CNT lần
-                # thì cập nhật current_session_plate
                 if plate_counter[plate] >= MIN_DETECT_CNT:
                     current_session_plate = plate
 
-            # Vẽ
-            cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-            cv2.putText(
-                frame, f"{plate}", (x, y-10),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2
-            )
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(frame, f"{plate}", (x, y - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
 
             boxes.append({
                 "x": int(x), "y": int(y), "w": int(w), "h": int(h),
                 "plate": plate
             })
 
-        if boxes:  # Chỉ cập nhật latest_boxes nếu có phát hiện trong frame hiện tại
+        if boxes:
             latest_boxes = boxes
 
-    # --- 3. Hiển thị FPS & frame ---
     fps = int(1.0 / (time.time() - t0 + 1e-6))
     cv2.putText(frame, f"FPS: {fps}", (7, 30),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (100, 255, 0), 2)
 
-    # Trả về frame đã xử lý, biển số ổn định, và boxes phát hiện trong frame
     return frame, get_display_plate(), boxes
 
 
+# ====== STREAM MJPEG VIDEO ======
 def generate_frames():
-    """Generate frames for video streaming"""
+    global latest_frame, last_frame_time
+
     while True:
-        if current_frame is not None:
-            processed_frame, _, _ = process_frame(current_frame)
-            if processed_frame is not None:
-                _, buffer = cv2.imencode('.jpg', processed_frame)
+        current_time = datetime.datetime.now()
+        time_diff = (current_time - last_frame_time).total_seconds()
+
+        if latest_frame is not None:
+            # Only show no signal if we've had no frames for a while
+            if time_diff > no_signal_timeout and np.array_equal(latest_frame, create_no_signal_frame()):
+                frame_to_show = create_no_signal_frame()
+                # Add text to indicate no active cameras
+                cv2.putText(frame_to_show, "No active cameras connected", (120, 300),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 1)
+            else:
+                frame_to_show = latest_frame.copy()
+
+            # Add timestamp and info to the frame
+            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
+            cv2.putText(frame_to_show, timestamp, (10, frame_to_show.shape[0] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+
+            # Add info about when the last frame was received
+            if time_diff > 3:  # Only show staleness warning after 3 seconds
+                status_text = f"Last frame: {int(time_diff)}s ago"
+                cv2.putText(frame_to_show, status_text, (10, 50),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+            success, buffer = cv2.imencode('.jpg', frame_to_show)
+            if success:
                 yield (b'--frame\r\n'
                        b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
-        time.sleep(0.01)  # Add a small delay to reduce CPU usage
+        else:
+            # If somehow latest_frame is None, provide the no signal frame
+            no_signal = create_no_signal_frame()
+            success, buffer = cv2.imencode('.jpg', no_signal)
+            if success:
+                yield (b'--frame\r\n'
+                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
 
-
-@app.post("/upload_frame")
-async def upload_frame(file: UploadFile = File(...)):
-    contents = await file.read()
-    nparr = np.frombuffer(contents, np.uint8)
-    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-    if frame is None:
-        raise HTTPException(status_code=400, detail="Invalid image format")
-
-    global latest_frame, latest_plate, latest_boxes
-    processed_frame, display_plate, boxes = process_frame(frame)
-    latest_frame = processed_frame
-    latest_plate = display_plate
-    latest_boxes = boxes
-
-    # Return no content, backend just stores the frame
-    return Response(status_code=204)
+        time.sleep(0.05)
 
 
 @app.get("/video_feed")
@@ -266,6 +246,51 @@ async def get_plate():
         "boxes": latest_boxes
     }
 
+
+# ====== WEBSOCKET NHẬN FRAME BASE64 ======
+@app.websocket("/ws/stream")
+async def websocket_endpoint(websocket: WebSocket):
+    global latest_frame, last_frame_time
+    await websocket.accept()
+    print("[WS] WebSocket connected.")
+
+    # Reset to the default frame when a new connection is established
+    if latest_frame is None:
+        latest_frame = create_no_signal_frame()
+
+    try:
+        while True:
+            data = await websocket.receive_text()
+            # Check if it's a heartbeat message
+            if data == "ping" or data == "heartbeat":
+                await websocket.send_text("pong")
+                continue
+
+            if data.startswith("data:image/jpeg;base64,"):
+                data = data.split(",", 1)[1]
+
+            try:
+                img_data = base64.b64decode(data)
+                nparr = np.frombuffer(img_data, np.uint8)
+                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+
+                if frame is not None:
+                    process_frame(frame)
+                    last_frame_time = datetime.datetime.now()  # Update the last frame time
+                    # Add a message to indicate frames are coming from WebSocket
+                    cv2.putText(latest_frame, "Live WebSocket Stream",
+                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                else:
+                    print("[WS] Frame decode failed.")
+            except Exception as e:
+                print(f"[WS] Error processing frame: {e}")
+
+    except WebSocketDisconnect:
+        print("[WS] WebSocket disconnected.")
+        # Don't reset the frame here - keep the last frame for other viewers
+
+
+# ====== CHẠY SERVER ======
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
