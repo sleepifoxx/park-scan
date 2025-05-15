@@ -26,11 +26,13 @@ async def init_db():
 
         # Create default parking configurations
         car_config = ParkingConfig(
+            id=1,
             vehicle_type=VehicleType.CAR,
             max_capacity=50,
             price_per_hour=10.0
         )
         motorcycle_config = ParkingConfig(
+            id=2,
             vehicle_type=VehicleType.MOTORCYCLE,
             max_capacity=100,
             price_per_hour=5.0

@@ -201,6 +201,7 @@ async def get_parking_config(db: AsyncSession = Depends(get_db)):
         "message": "Lấy thông tin bãi đỗ thành công",
         "config": [
             {
+                "id": item.id,
                 "vehicle_type": item.vehicle_type,
                 "max_capacity": item.max_capacity,
                 "price_per_hour": item.price_per_hour
@@ -371,6 +372,7 @@ async def get_all_parking_sessions(db: AsyncSession = Depends(get_db)):
         "message": "Lấy danh sách phiên đỗ xe thành công",
         "sessions": [
             {
+                "id": session.id,
                 "license_plate": session.license_plate,
                 "vehicle_type": session.vehicle_type,
                 "time_in": session.time_in,
@@ -413,10 +415,9 @@ async def update_parking_session(license_plate: str, session_update: ParkingSess
 
 
 @app.delete("/delete_parking_session/{license_plate}", tags=["Parking"])
-async def delete_parking_session(license_plate: str, db: AsyncSession = Depends(get_db)):
+async def delete_parking_session(id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ParkingSession).filter(
-        ParkingSession.license_plate == license_plate,
-        ParkingSession.status == "active"
+        ParkingSession.id == id,
     ))
     session = result.scalars().first()
     if not session:
@@ -431,13 +432,14 @@ async def delete_parking_session(license_plate: str, db: AsyncSession = Depends(
 
 
 @app.post("/admin/create_parking_config", tags=["Admin"])
-async def create_parking_config(vehicle_type: VehicleType, max_capacity: int, price_per_hour: float, db: AsyncSession = Depends(get_db)):
+async def create_parking_config(id: int, vehicle_type: VehicleType, max_capacity: int, price_per_hour: float, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ParkingConfig).filter(ParkingConfig.vehicle_type == vehicle_type))
     config = result.scalars().first()
 
     if config:
         return {"status": StatusCode.ERROR, "message": "Cấu hình bãi đỗ cho loại xe này đã tồn tại"}
     new_config = ParkingConfig(
+        id=id,
         vehicle_type=vehicle_type,
         max_capacity=max_capacity,
         price_per_hour=price_per_hour
