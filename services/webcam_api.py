@@ -193,9 +193,9 @@ def process_frame(frame):
                 if plate_counter[plate] >= MIN_DETECT_CNT:
                     current_session_plate = plate
 
-            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            cv2.putText(frame, f"{plate}", (x, y - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
+            # cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            # cv2.putText(frame, f"{plate}", (x, y - 10),
+            #             cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
 
             boxes.append({
                 "x": int(x), "y": int(y), "w": int(w), "h": int(h),
@@ -289,9 +289,9 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             data = await websocket.receive_text()
             # Check if it's a heartbeat message
-            if data == "ping" or data == "heartbeat":
-                await websocket.send_text("pong")
-                continue
+            # if data == "ping" or data == "heartbeat":
+            #     await websocket.send_text("pong")
+            #     continue
 
             if data.startswith("data:image/jpeg;base64,"):
                 data = data.split(",", 1)[1]
@@ -319,16 +319,35 @@ async def websocket_endpoint(websocket: WebSocket):
                             latest_frame = processed_frame
                             last_frame_time = datetime.datetime.now()
 
+                            # Draw bounding boxes for all detected plates
+                            for box in boxes:
+                                x, y, w, h = box["x"], box["y"], box["w"], box["h"]
+                                cv2.rectangle(latest_frame, (x, y),
+                                              (x + w, y + h), (0, 255, 0), 2)
+                                # Make text more visible with background
+                                text = box['plate']
+                                text_size = cv2.getTextSize(
+                                    text, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)[0]
+                                cv2.rectangle(
+                                    latest_frame, (x, y - 30), (x + text_size[0], y), (0, 0, 0), -1)
+                                cv2.putText(latest_frame, text, (x, y - 10),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
+
+                            # Display current plate at the top of the frame
+                            if plate != "No plate detected":
+                                plate_text = f"Detected: {plate}"
+                                cv2.putText(latest_frame, plate_text, (10, 120),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
                             # Add a message to indicate frames are coming from WebSocket
                             cv2.putText(latest_frame, "Live WebSocket Stream",
                                         (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
 
                             # Send plate information back to the client
-                            if plate:
-                                await websocket.send_text(json.dumps({
-                                    "plate": plate,
-                                    "boxes": boxes
-                                }))
+                            # if plate:
+                            #     await websocket.send_text(json.dumps({
+                            #         "plate": plate,
+                            #         "boxes": boxes
+                            #     }))
                     except Exception as e:
                         print(f"[WS] Error in process_frame: {str(e)}")
                         # Reset last_gray to avoid propagating the error
@@ -344,9 +363,3 @@ async def websocket_endpoint(websocket: WebSocket):
         print("[WS] WebSocket disconnected.")
     except Exception as e:
         print(f"[WS] Unexpected error in websocket handler: {str(e)}")
-
-
-# ====== CHẠY SERVER ======
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
