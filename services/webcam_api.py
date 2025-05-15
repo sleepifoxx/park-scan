@@ -1,19 +1,34 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic_settings import BaseSettings
 import cv2
 import torch
 import time
 import collections
 import numpy as np
 import base64
-import function.utils_rotate as utils_rotate
-import function.helper as helper
 import datetime
-import json
+import asyncio
+from function import helper, utils_rotate
 
+# ====== CONFIG ======
+
+
+class Settings(BaseSettings):
+    frames_per_process: int = 5  # Process every Nth frame instead of using fps
+    motion_thresh: int = 1000
+    no_motion_time: float = 1.0
+    min_detect_cnt: int = 3
+    standard_width: int = 640
+    standard_height: int = 480
+    no_signal_timeout: int = 10
+
+
+settings = Settings()
+
+# ====== APPLICATION ======
 app = FastAPI(title="License Plate Recognition API")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -22,344 +37,178 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ====== CẤU HÌNH ======
-FPS_YOLO = 3
-MOTION_THRESH = 1000
-NO_MOTION_TIME = 1.0
-MIN_DETECT_CNT = 3
-STANDARD_WIDTH = 640  # Standard width for all processed frames
-STANDARD_HEIGHT = 480  # Standard height for all processed frames
-
-# ====== LOAD YOLO MODEL ======
-print("Loading YOLO models...")
-yolo_LP_detect = torch.hub.load('yolov5', 'custom', path='model/LP_detector_nano_61.pt',
-                                force_reload=True, source='local')
-yolo_license_plate = torch.hub.load('yolov5', 'custom', path='model/LP_ocr_nano_62.pt',
-                                    force_reload=True, source='local')
-yolo_license_plate.conf = 0.60
-
-# ====== BIẾN TOÀN CỤC ======
-last_gray = None
-motion_start = 0
-last_motion = 0
-yolo_last_time = 0
-plate_counter = collections.Counter()
-session_active = False
-latest_frame = None
-latest_plate = None
-plate_history = []
-current_session_plate = None
-latest_boxes = []
-last_frame_time = datetime.datetime.now()
-no_signal_timeout = 10  # seconds before showing no signal
-
-# Create a default "No Signal" frame to display when no frames are available
+# ====== RECOGNIZER CLASS ======
 
 
-def create_no_signal_frame():
-    # Create a black image with text
-    frame = np.zeros((480, 640, 3), np.uint8)
-    cv2.putText(frame, "No video signal", (180, 240),
-                cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
-    cv2.putText(frame, "Waiting for camera connection...", (120, 270),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 1)
-    return frame
+class LicensePlateRecognizer:
+    def __init__(self, cfg: Settings):
+        self.cfg = cfg
+        self.device = 'cpu'
+        # model placeholders
+        self.detector = None
+        self.reader = None
+        self.last_gray = None
+        self.motion_start = 0
+        self.last_motion = 0
+        self.frame_counter = 0  # Counter for frames to determine when to process
+        self.counter = collections.Counter()
+        self.session_active = False
+        self.latest_frame = self._create_no_signal()
+        self.latest_plate = None
+        self.last_boxes = []
+        self.history = []
+        self.current_plate = None
+        self.last_frame_time = datetime.datetime.now()
 
+    def _create_no_signal(self):
+        f = np.zeros((self.cfg.standard_height,
+                     self.cfg.standard_width, 3), np.uint8)
+        cv2.putText(f, "No video signal", (180, 240),
+                    cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
+        return f
 
-# Initialize with a no signal frame
-latest_frame = create_no_signal_frame()
+    def load_models(self):
+        self.detector = torch.hub.load(
+            'yolov5', 'custom', path='model/LP_detector_nano_61.pt', source='local')
+        self.reader = torch.hub.load(
+            'yolov5', 'custom', path='model/LP_ocr_nano_62.pt', source='local')
+        self.reader.conf = 0.6
 
-# ====== HÀM HỖ TRỢ ======
+    def normalize(self, frame):
+        h, w = frame.shape[:2]
+        if (w, h) != (self.cfg.standard_width, self.cfg.standard_height):
+            return cv2.resize(frame, (self.cfg.standard_width, self.cfg.standard_height))
+        return frame
 
+    def _read_plate(self, img):
+        # try rotations
+        for cc in range(2):
+            for ct in range(2):
+                txt = helper.read_plate(
+                    self.reader, utils_rotate.deskew(img, cc, ct))
+                if txt != 'unknown':
+                    return txt
+        return 'unknown'
 
-def normalize_frame_size(frame):
-    """Ensure all frames have consistent dimensions"""
-    if frame is None:
-        return None
+    def _motion_check(self, frame_gray):
+        if self.last_gray is None:
+            self.last_gray = frame_gray
+            return False
+        if self.last_gray.shape != frame_gray.shape:
+            self.last_gray = frame_gray
+            return False
+        delta = cv2.absdiff(self.last_gray, frame_gray)
+        thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
+        cnts, _ = cv2.findContours(cv2.dilate(
+            thresh, None, iterations=2), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        self.last_gray = frame_gray
+        return any(cv2.contourArea(c) > self.cfg.motion_thresh for c in cnts)
 
-    h, w = frame.shape[:2]
+    def process(self, frame):
+        frame = self.normalize(frame)
+        now = time.time()
+        gray = cv2.GaussianBlur(cv2.cvtColor(
+            frame, cv2.COLOR_BGR2GRAY), (21, 21), 0)
+        motion = self._motion_check(gray)
 
-    # Only resize if the dimensions don't match our standard
-    if w != STANDARD_WIDTH or h != STANDARD_HEIGHT:
-        return cv2.resize(frame, (STANDARD_WIDTH, STANDARD_HEIGHT))
-    return frame
-
-
-def read_license_plate(img):
-    for cc in range(2):
-        for ct in range(2):
-            txt = helper.read_plate(
-                yolo_license_plate,
-                utils_rotate.deskew(img, cc, ct)
-            )
-            if txt != "unknown":
-                return txt
-    return "unknown"
-
-
-def get_display_plate():
-    if current_session_plate and current_session_plate != "unknown":
-        return current_session_plate
-    elif latest_plate and latest_plate != "unknown":
-        return latest_plate
-    else:
-        return "No plate detected"
-
-
-def process_frame(frame):
-    global last_gray, motion_start, last_motion, yolo_last_time
-    global plate_counter, session_active, latest_frame
-    global latest_plate, latest_boxes, current_session_plate
-
-    if frame is None:
-        return None, get_display_plate(), []
-
-    # Normalize frame size before processing
-    frame = normalize_frame_size(frame)
-
-    t0 = time.time()
-    latest_frame = frame.copy()
-
-    # Motion detection
-    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray, (21, 21), 0)
-
-    if last_gray is None:
-        last_gray = gray
-        return frame, get_display_plate(), []
-
-    # Ensure last_gray has the same dimensions as the current gray frame
-    if last_gray.shape != gray.shape:
-        print(
-            f"[DEBUG] Frame size mismatch: last_gray {last_gray.shape} vs current {gray.shape}")
-        last_gray = gray
-        return frame, get_display_plate(), []
-
-    delta = cv2.absdiff(last_gray, gray)
-    thresh = cv2.threshold(delta, 25, 255, cv2.THRESH_BINARY)[1]
-    thresh = cv2.dilate(thresh, None, iterations=2)
-    cnts, _ = cv2.findContours(
-        thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    last_gray = gray
-
-    motion = any(cv2.contourArea(c) > MOTION_THRESH for c in cnts)
-    now = time.time()
-
-    if motion:
-        if not session_active:
-            session_active = True
-            motion_start = now
-            plate_counter.clear()
-            current_session_plate = None
-            print(f"[{time.strftime('%H:%M:%S')}] Motion detected. Start session.")
-        last_motion = now
-    else:
-        if session_active and (now - last_motion) > NO_MOTION_TIME:
-            session_active = False
-            if plate_counter:
-                plate, cnt = plate_counter.most_common(1)[0]
-                if cnt >= MIN_DETECT_CNT and plate != "unknown":
-                    latest_plate = plate
-                    with open("plate.txt", "a") as f:
-                        f.write(f"{plate}\n")
-                    if not plate_history or plate_history[-1] != plate:
-                        plate_history.append(plate)
-                        if len(plate_history) > 10:
-                            plate_history.pop(0)
-                    print(
-                        f"[{time.strftime('%H:%M:%S')}] Session ended. Plate: {plate} ({cnt} times).")
-            else:
-                print(
-                    f"[{time.strftime('%H:%M:%S')}] Session ended. No valid plate.")
-
-            plate_counter.clear()
-            current_session_plate = None
-
-    boxes = []
-
-    if session_active and (now - yolo_last_time) >= 1.0 / FPS_YOLO:
-        yolo_last_time = now
-        results = yolo_LP_detect(frame, size=640)
-        detection_boxes = results.pandas().xyxy[0].values.tolist()
-
-        for b in detection_boxes:
-            x1, y1, x2, y2, _, _, _ = b
-            x, y, w, h = int(x1), int(y1), int(x2 - x1), int(y2 - y1)
-            crop = frame[y:y + h, x:x + w]
-            plate = read_license_plate(crop)
-            plate_counter[plate] += 1
-
-            if plate != "unknown":
-                if plate_counter[plate] >= MIN_DETECT_CNT:
-                    current_session_plate = plate
-
-            # cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-            # cv2.putText(frame, f"{plate}", (x, y - 10),
-            #             cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
-
-            boxes.append({
-                "x": int(x), "y": int(y), "w": int(w), "h": int(h),
-                "plate": plate
-            })
-
-        if boxes:
-            latest_boxes = boxes
-
-    fps = int(1.0 / (time.time() - t0 + 1e-6))
-    cv2.putText(frame, f"FPS: {fps}", (7, 30),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (100, 255, 0), 2)
-
-    return frame, get_display_plate(), boxes
-
-
-# ====== STREAM MJPEG VIDEO ======
-def generate_frames():
-    global latest_frame, last_frame_time
-
-    while True:
-        current_time = datetime.datetime.now()
-        time_diff = (current_time - last_frame_time).total_seconds()
-
-        if latest_frame is not None:
-            frame_to_show = latest_frame.copy()
-
-            # Add timestamp to the frame
-            timestamp = time.strftime("%Y-%m-%d %H:%M:%S")
-            cv2.putText(frame_to_show, timestamp, (10, frame_to_show.shape[0] - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
-
-            # Only show "No signal" message if we've had no frames for a significant time
-            if time_diff > no_signal_timeout:
-                # Instead of completely replacing with no signal frame,
-                # just overlay a status message on the current frame
-                cv2.putText(frame_to_show, "No active camera feed",
-                            (frame_to_show.shape[1]//2 -
-                             150, frame_to_show.shape[0]//2),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 0, 255), 2)
-                cv2.putText(frame_to_show, f"Last frame: {int(time_diff)}s ago",
-                            (frame_to_show.shape[1]//2 - 120,
-                             frame_to_show.shape[0]//2 + 30),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
-            elif time_diff > 3:  # Only show staleness warning after 3 seconds
-                status_text = f"Last frame: {int(time_diff)}s ago"
-                cv2.putText(frame_to_show, status_text, (10, 50),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-
-            success, buffer = cv2.imencode('.jpg', frame_to_show)
-            if success:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+        # manage session
+        if motion:
+            if not self.session_active:
+                self.session_active = True
+                self.counter.clear()
+                self.current_plate = None
+                self.last_motion = now
+            self.last_motion = now
         else:
-            # If somehow latest_frame is None, provide the no signal frame
-            no_signal = create_no_signal_frame()
-            success, buffer = cv2.imencode('.jpg', no_signal)
-            if success:
-                yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + buffer.tobytes() + b'\r\n')
+            if self.session_active and now-self.last_motion > self.cfg.no_motion_time:
+                self.session_active = False
+                if self.counter:
+                    plate, count = self.counter.most_common(1)[0]
+                    if count >= self.cfg.min_detect_cnt and plate != 'unknown':
+                        self.latest_plate = plate
+                        self.history.append(plate)
+                self.counter.clear()
+                self.current_plate = None
 
+        boxes = []
+        # Increment frame counter and process only every Nth frame
+        self.frame_counter += 1
+        if self.session_active:
+            self.last_boxes = []
+
+        if self.session_active and self.frame_counter >= self.cfg.frames_per_process:
+            self.frame_counter = 0  # Reset counter
+            results = self.detector(frame, size=self.cfg.standard_width)
+            for b in results.pandas().xyxy[0].values.tolist():
+                # b is [x1, y1, x2, y2, confidence, class, name]
+                x1, y1, x2, y2 = map(int, b[:4])
+                # optional: conf = b[4]; cls = b[5]
+                crop = frame[y1:y2, x1:x2]
+                plate = self._read_plate(crop)
+                self.counter[plate] += 1
+                if self.counter[plate] >= self.cfg.min_detect_cnt:
+                    self.current_plate = plate
+                boxes.append({
+                    "x": x1, "y": y1,
+                    "w": x2 - x1, "h": y2 - y1,
+                    "plate": plate
+                })
+            if boxes:
+                self.last_boxes = boxes
+
+        # Always draw the last detected boxes on every frame
+        for box in self.last_boxes:
+            x, y, w, h = box["x"], box["y"], box["w"], box["h"]
+            cv2.rectangle(frame, (x, y), (x+w, y+h),
+                          (0, 255, 0), 2)
+            cv2.putText(frame, box["plate"], (x+5, y-10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (100, 255, 0), 2)
+
+        self.latest_frame = frame
+        self.last_frame_time = datetime.datetime.now()
+        return frame, self.latest_plate or "No plate detected", self.last_boxes
+
+
+recognizer = LicensePlateRecognizer(settings)
+
+
+@app.on_event("startup")
+def startup_event():
+    recognizer.load_models()
+
+# ====== VIDEO STREAM ======
+
+
+def frame_generator():
+    while True:
+        frame, plate, boxes = recognizer.latest_frame, recognizer.latest_plate, recognizer.last_boxes
+        buf = cv2.imencode('.jpg', frame)[1].tobytes()
+        yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n'+buf+b'\r\n')
         time.sleep(0.05)
 
 
 @app.get("/video_feed")
 async def video_feed():
-    return StreamingResponse(
-        generate_frames(),
-        media_type='multipart/x-mixed-replace; boundary=frame'
-    )
+    return StreamingResponse(frame_generator(), media_type='multipart/x-mixed-replace; boundary=frame')
 
 
 @app.get("/get_plate")
 async def get_plate():
-    if latest_plate is None:
-        return {"plate": "No plate detected", "boxes": []}
-    return {
-        "plate": latest_plate,
-        "boxes": latest_boxes
-    }
+    return {"plate": recognizer.latest_plate or "No plate detected", "boxes": recognizer.last_boxes}
 
 
-# ====== WEBSOCKET NHẬN FRAME BASE64 ======
 @app.websocket("/ws/stream")
-async def websocket_endpoint(websocket: WebSocket):
-    global latest_frame, last_frame_time
+async def ws_stream(websocket: WebSocket):
     await websocket.accept()
-    print("[WS] WebSocket connected.")
-
     try:
         while True:
             data = await websocket.receive_text()
-            # Check if it's a heartbeat message
-            # if data == "ping" or data == "heartbeat":
-            #     await websocket.send_text("pong")
-            #     continue
-
             if data.startswith("data:image/jpeg;base64,"):
-                data = data.split(",", 1)[1]
-
-            try:
-                img_data = base64.b64decode(data)
-                nparr = np.frombuffer(img_data, np.uint8)
-                frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-
+                img = base64.b64decode(data.split(',', 1)[1])
+                arr = np.frombuffer(img, np.uint8)
+                frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
                 if frame is not None:
-                    # Log the frame dimensions for debugging
-
-                    # frame_shape = frame.shape
-                    # print(f"[WS] Received frame with shape: {frame_shape}")
-
-                    # Normalize the frame to standard size
-                    frame = normalize_frame_size(frame)
-
-                    # Process the frame and update the timestamp
-                    try:
-                        processed_frame, plate, boxes = process_frame(frame)
-
-                        # Update latest_frame with the processed frame
-                        if processed_frame is not None:
-                            latest_frame = processed_frame
-                            last_frame_time = datetime.datetime.now()
-
-                            # Draw bounding boxes for all detected plates
-                            for box in boxes:
-                                x, y, w, h = box["x"], box["y"], box["w"], box["h"]
-                                cv2.rectangle(latest_frame, (x, y),
-                                              (x + w, y + h), (0, 255, 0), 2)
-                                # Make text more visible with background
-                                text = box['plate']
-                                text_size = cv2.getTextSize(
-                                    text, cv2.FONT_HERSHEY_SIMPLEX, 0.9, 2)[0]
-                                cv2.rectangle(
-                                    latest_frame, (x, y - 30), (x + text_size[0], y), (0, 0, 0), -1)
-                                cv2.putText(latest_frame, text, (x, y - 10),
-                                            cv2.FONT_HERSHEY_SIMPLEX, 0.9, (36, 255, 12), 2)
-
-                            # Display current plate at the top of the frame
-                            if plate != "No plate detected":
-                                plate_text = f"Detected: {plate}"
-                                cv2.putText(latest_frame, plate_text, (10, 120),
-                                            cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 255), 2)
-                            # Add a message to indicate frames are coming from WebSocket
-                            cv2.putText(latest_frame, "Live WebSocket Stream",
-                                        (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
-
-                            # Send plate information back to the client
-                            # if plate:
-                            #     await websocket.send_text(json.dumps({
-                            #         "plate": plate,
-                            #         "boxes": boxes
-                            #     }))
-                    except Exception as e:
-                        print(f"[WS] Error in process_frame: {str(e)}")
-                        # Reset last_gray to avoid propagating the error
-                        last_gray = None
-                else:
-                    print("[WS] Frame decode failed.")
-                    await websocket.send_text(json.dumps({"status": "no_active_feed", "error": "Frame decode failed"}))
-            except Exception as e:
-                print(f"[WS] Error processing frame: {e}")
-                await websocket.send_text(json.dumps({"status": "error", "message": str(e)}))
-
+                    recognizer.process(frame)
+            await asyncio.sleep(0)
     except WebSocketDisconnect:
-        print("[WS] WebSocket disconnected.")
-    except Exception as e:
-        print(f"[WS] Unexpected error in websocket handler: {str(e)}")
+        pass
