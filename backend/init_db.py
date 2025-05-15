@@ -19,7 +19,7 @@ async def init_db():
         admin = User(
             username="admin",
             email="admin@example.com",
-            hashed_password=pwd_context.hash("adminpassword"),
+            hashed_password=pwd_context.hash("password"),
             role=UserRole.ADMIN
         )
         session.add(admin)

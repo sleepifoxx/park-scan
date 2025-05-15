@@ -1,6 +1,8 @@
-from sqlalchemy import Boolean, Column, Integer, String, func, DateTime, Float, Enum
+from sqlalchemy import Boolean, Column, Integer, String, DateTime, Float, Enum
 from sqlalchemy.ext.declarative import declarative_base
 import enum
+from datetime import datetime, timedelta, timezone
+
 
 Base = declarative_base()
 
@@ -15,6 +17,12 @@ class VehicleType(str, enum.Enum):
     MOTORCYCLE = "motorcycle"
 
 
+class StatusCode(str, enum.Enum):
+    SUCCESS = "success"
+    ERROR = "error"
+    PENDING = "pending"
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -24,7 +32,8 @@ class User(Base):
     hashed_password = Column(String)
     role = Column(Enum(UserRole), default=UserRole.USER)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=datetime.now(
+        timezone(timedelta(hours=7))))
 
 
 class ParkingConfig(Base):
@@ -33,17 +42,21 @@ class ParkingConfig(Base):
     vehicle_type = Column(String)
     max_capacity = Column(Integer)
     price_per_hour = Column(Float)
-    created_at = Column(DateTime, default=func.now())
-    updated_at = Column(DateTime, default=func.now(),
-                        onupdate=func.now())
+    created_at = Column(DateTime, default=datetime.now(
+        timezone(timedelta(hours=7))))
+    updated_at = Column(DateTime, default=datetime.now(timezone(timedelta(hours=7))),
+                        onupdate=datetime.now(timezone(timedelta(hours=7))))
 
 
 class ParkingSession(Base):
     __tablename__ = "parking_sessions"
     vehicle_type = Column(String)
-    license_plate = Column(String, primary_key=True, index=True)
-    time_in = Column(DateTime, default=func.now())
+    id = Column(Integer, primary_key=True, index=True)
+    license_plate = Column(String)
+    time_in = Column(DateTime, default=datetime.now(
+        timezone(timedelta(hours=7))))
     time_out = Column(DateTime, nullable=True)
     fee = Column(Float, nullable=True)
     status = Column(String, default="active")  # active, closed
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=datetime.now(
+        timezone(timedelta(hours=7))))
