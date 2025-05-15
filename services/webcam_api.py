@@ -133,7 +133,7 @@ class LicensePlateRecognizer:
         boxes = []
         # Increment frame counter and process only every Nth frame
         self.frame_counter += 1
-        if self.session_active:
+        if not self.session_active:
             self.last_boxes = []
 
         if self.session_active and self.frame_counter >= self.cfg.frames_per_process:
@@ -184,7 +184,7 @@ def frame_generator():
         frame, plate, boxes = recognizer.latest_frame, recognizer.latest_plate, recognizer.last_boxes
         buf = cv2.imencode('.jpg', frame)[1].tobytes()
         yield (b'--frame\r\nContent-Type: image/jpeg\r\n\r\n'+buf+b'\r\n')
-        time.sleep(0.05)
+        time.sleep(0.04)
 
 
 @app.get("/video_feed")

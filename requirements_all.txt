@@ -11,6 +11,7 @@ pandas>=1.5.0,<2.3
 seaborn>=0.12.0,<0.13
 IPython
 setuptools
+pydantic-settings
 
 
 aiosqlite
