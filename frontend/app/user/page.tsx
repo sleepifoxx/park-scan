@@ -17,7 +17,7 @@ interface PlateInfo {
     boxes: DetectionBox[];
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8000";
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000";
 const WS_URL = API_BASE_URL.replace(/^http/, 'ws') + "/ws/stream";
 
 export default function UserPage() {
