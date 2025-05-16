@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Expose the port the app runs on
-EXPOSE 5000
+EXPOSE 8001
 
 # Command to run the application
-CMD ["uvicorn", "webcam_api:app", "--reload", "--host", "0.0.0.0", "--port", "5000"] 
+CMD ["uvicorn", "webcam_api:app", "--host", "0.0.0.0", "--port", "8001"] 

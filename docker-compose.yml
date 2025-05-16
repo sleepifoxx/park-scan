@@ -6,9 +6,7 @@ services:
       context: ./services
       dockerfile: Dockerfile
     ports:
-      - "5000:5000"
-    networks:
-      - app-network
+      - "8001:8001"
 
   frontend:
     build:
@@ -16,11 +14,6 @@ services:
       dockerfile: Dockerfile
     ports:
       - "3000:3000"
-    networks:
-      - app-network
     depends_on:
       - services
 
-networks:
-  app-network:
-    driver: bridge
