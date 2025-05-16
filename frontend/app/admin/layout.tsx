@@ -1,10 +1,10 @@
 "use client"
 
+import Cookies from "js-cookie"
 import type React from "react"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { useAuth } from "@/context/auth-context"
 import AdminSidebar from "@/components/admin-sidebar"
 
 export default function AdminLayout({
@@ -12,20 +12,27 @@ export default function AdminLayout({
 }: {
   children: React.ReactNode
 }) {
-  const { user, isAdmin } = useAuth()
+  const [user, setUser] = useState<any>(null)
+  const [loading, setLoading] = useState(true)
   const router = useRouter()
 
   useEffect(() => {
-    // Redirect if not logged in or not an admin
-    if (!user || !isAdmin) {
-      router.push("/login")
+    if (typeof window === "undefined") return
+    const userStr = Cookies.get("user")
+    if (!userStr) {
+      router.replace("/login")
+      return
     }
-  }, [user, isAdmin, router])
+    const userObj = JSON.parse(userStr)
+    if (userObj.role !== "admin") {
+      router.replace("/login")
+      return
+    }
+    setUser(userObj)
+    setLoading(false)
+  }, [router])
 
-  // Don't render anything until we've checked authentication
-  if (!user || !isAdmin) {
-    return null
-  }
+  if (loading) return null
 
   return (
     <div className="flex min-h-screen">

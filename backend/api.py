@@ -204,7 +204,9 @@ async def get_parking_config(db: AsyncSession = Depends(get_db)):
                 "id": item.id,
                 "vehicle_type": item.vehicle_type,
                 "max_capacity": item.max_capacity,
-                "price_per_hour": item.price_per_hour
+                "price_per_hour": item.price_per_hour,
+                "created_at": item.created_at,
+                "updated_at": item.updated_at
             } for item in config
         ]
     }

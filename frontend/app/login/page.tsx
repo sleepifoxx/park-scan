@@ -1,31 +1,53 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import Link from "next/link"
-import { useAuth } from "@/context/auth-context"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { AlertCircle, Car } from "lucide-react"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import { login as apiLogin } from "@/api/api_backend"
+import Cookies from "js-cookie"
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("")
+  const [username, setUsername] = useState("")
   const [password, setPassword] = useState("")
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const { login } = useAuth()
+  const router = useRouter()
+
+  const res = Cookies.get("user")
+  if (res) {
+    const user = JSON.parse(res)
+    if (user.role === "admin") {
+      window.location.href = "/admin"
+    } else {
+      window.location.href = "/user"
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     setIsLoading(true)
-
     try {
-      await login(email, password)
+      const res = await apiLogin(username, password)
+      if (res.status !== "success") {
+        setError(res.message || "Đăng nhập thất bại")
+      } else {
+        // Save user info to cookie
+        Cookies.set("user", JSON.stringify(res.user), { expires: 7 })
+        // Redirect by role
+        if (res.user.role === "admin") {
+          router.replace("/admin")
+        } else {
+          router.replace("/user")
+        }
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Đăng nhập thất bại")
     } finally {
@@ -54,13 +76,13 @@ export default function LoginPage() {
           )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="username">Tên đăng nhập</Label>
               <Input
-                id="email"
-                type="email"
-                placeholder="your.email@example.com"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="username"
+                type="text"
+                placeholder="Tên đăng nhập"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
                 required
                 className="h-11"
               />
@@ -85,15 +107,6 @@ export default function LoginPage() {
               {isLoading ? "Đang đăng nhập..." : "Đăng nhập"}
             </Button>
           </form>
-
-          <div className="mt-4 text-center text-sm">
-            <p className="text-muted-foreground">Tài khoản demo:</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Admin: admin@example.com / password
-              <br />
-              User: user@example.com / password
-            </p>
-          </div>
         </CardContent>
         <CardFooter className="flex justify-center border-t pt-4">
           <p className="text-sm text-muted-foreground">

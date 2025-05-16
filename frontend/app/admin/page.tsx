@@ -1,5 +1,7 @@
 "use client"
 
+import { useEffect, useState } from "react"
+import { Users, Car, AlertTriangle } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -10,54 +12,80 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
 } from "recharts"
-import { Users, Car, AlertTriangle, Activity } from "lucide-react"
-
-// Mock data for charts
-const vehicleData = [
-  { name: "T1", count: 120 },
-  { name: "T2", count: 190 },
-  { name: "T3", count: 150 },
-  { name: "T4", count: 270 },
-  { name: "T5", count: 320 },
-  { name: "T6", count: 240 },
-  { name: "T7", count: 180 },
-  { name: "T8", count: 230 },
-  { name: "T9", count: 340 },
-  { name: "T10", count: 280 },
-  { name: "T11", count: 210 },
-  { name: "T12", count: 170 },
-]
-
-const vehicleTypeData = [
-  { name: "Xe máy", value: 55 },
-  { name: "Ô tô 4-7 chỗ", value: 30 },
-  { name: "Ô tô > 7 chỗ", value: 10 },
-  { name: "Khác", value: 5 },
-]
-
-const COLORS = ["#0088FE", "#00C49F", "#FFBB28", "#FF8042"]
+import {
+  getAllUsers,
+  getAllParkingSessions,
+} from "@/api/api_backend"
 
 export default function AdminDashboard() {
+  const [userCount, setUserCount] = useState<number | null>(null)
+  const [vehicleCount, setVehicleCount] = useState<number | null>(null)
+  const [revenue, setRevenue] = useState<number | null>(null)
+  const [monthlyStats, setMonthlyStats] = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function fetchData() {
+      setLoading(true)
+      // Get users
+      const usersRes = await getAllUsers()
+      setUserCount(usersRes?.users?.length ?? 0)
+
+      // Get parking sessions
+      const sessionsRes = await getAllParkingSessions()
+      const sessions = sessionsRes?.sessions ?? []
+
+      setVehicleCount(sessions.length)
+
+      // Revenue: sum all session.fee
+      let totalRevenue = 0
+      sessions.forEach((s: any) => {
+        if (typeof s.fee === "number") totalRevenue += s.fee
+      })
+      setRevenue(totalRevenue)
+
+      // Monthly stats: count vehicles per month
+      const months: { [key: string]: number } = {}
+      sessions.forEach((s: any) => {
+        if (!s.time_in) return
+        const date = new Date(s.time_in)
+        const key = `${date.getFullYear()}-${date.getMonth() + 1}`
+        months[key] = (months[key] || 0) + 1
+      })
+      // Get last 12 months
+      const now = new Date()
+      const stats: any[] = []
+      for (let i = 11; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+        const key = `${d.getFullYear()}-${d.getMonth() + 1}`
+        stats.push({
+          name: `T${d.getMonth() + 1}`,
+          count: months[key] || 0,
+        })
+      }
+      setMonthlyStats(stats)
+      setLoading(false)
+    }
+    fetchData()
+  }, [])
+
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Tổng quan hệ thống</h1>
+    <div className="space-y-6 px-2 md:px-4">
+      <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-2">
+        <h1 className="text-2xl md:text-3xl font-bold">Tổng quan hệ thống</h1>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Tổng người dùng</CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">1,234</div>
-            <p className="text-xs text-muted-foreground">+12% so với tháng trước</p>
+            <div className="text-2xl font-bold">
+              {loading ? "..." : userCount}
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -66,8 +94,9 @@ export default function AdminDashboard() {
             <Car className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">23,456</div>
-            <p className="text-xs text-muted-foreground">+18% so với tháng trước</p>
+            <div className="text-2xl font-bold">
+              {loading ? "..." : vehicleCount}
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -76,18 +105,9 @@ export default function AdminDashboard() {
             <AlertTriangle className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">35.6M</div>
-            <p className="text-xs text-muted-foreground">+5% so với tháng trước</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Tỷ lệ nhận diện</CardTitle>
-            <Activity className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">98.3%</div>
-            <p className="text-xs text-muted-foreground">+2.4% so với tháng trước</p>
+            <div className="text-2xl font-bold">
+              {loading ? "..." : (revenue ? `${revenue.toLocaleString()}₫` : "0₫")}
+            </div>
           </CardContent>
         </Card>
       </div>
@@ -95,7 +115,6 @@ export default function AdminDashboard() {
       <Tabs defaultValue="vehicles" className="space-y-4">
         <TabsList>
           <TabsTrigger value="vehicles">Xe ra vào theo tháng</TabsTrigger>
-          <TabsTrigger value="types">Phân bố theo loại xe</TabsTrigger>
         </TabsList>
         <TabsContent value="vehicles" className="space-y-4">
           <Card>
@@ -103,10 +122,10 @@ export default function AdminDashboard() {
               <CardTitle>Thống kê xe ra vào theo tháng</CardTitle>
               <CardDescription>Số lượng xe ra vào trong 12 tháng qua</CardDescription>
             </CardHeader>
-            <CardContent className="h-96">
+            <CardContent className="h-72 md:h-96">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
-                  data={vehicleData}
+                  data={monthlyStats}
                   margin={{
                     top: 20,
                     right: 30,
@@ -120,36 +139,6 @@ export default function AdminDashboard() {
                   <Tooltip />
                   <Bar dataKey="count" fill="#3b82f6" />
                 </BarChart>
-              </ResponsiveContainer>
-            </CardContent>
-          </Card>
-        </TabsContent>
-        <TabsContent value="types" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle>Phân bố theo loại xe</CardTitle>
-              <CardDescription>Tỷ lệ các loại xe được quản lý trong hệ thống</CardDescription>
-            </CardHeader>
-            <CardContent className="h-96">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={vehicleTypeData}
-                    cx="50%"
-                    cy="50%"
-                    labelLine={false}
-                    label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                    outerRadius={150}
-                    fill="#8884d8"
-                    dataKey="value"
-                  >
-                    {vehicleTypeData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip />
-                  <Legend />
-                </PieChart>
               </ResponsiveContainer>
             </CardContent>
           </Card>

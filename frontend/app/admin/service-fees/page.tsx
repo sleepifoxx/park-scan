@@ -1,77 +1,83 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useToast } from "@/components/ui/use-toast"
-import { CreditCard, Save, Clock, Calendar } from "lucide-react"
+import { CreditCard, Save, Clock, Users, Calendar } from "lucide-react"
+import * as api from "@/api/api_backend"
 
 type FeeStructure = {
-  id: string
+  id: number
   vehicleType: string
   hourlyRate: number
-  dailyRate: number
-  monthlyRate: number
-  description: string
-  lastUpdated: string
+  maxCapacity: number
+  createdAt: string
+  updatedAt: string
+}
+
+function getVehicleTypeLabel(type: string) {
+  if (type === "car") return "Ô tô"
+  if (type === "motorcycle") return "Xe máy"
+  return type
 }
 
 export default function ServiceFeesPage() {
   const { toast } = useToast()
-  const [feeStructures, setFeeStructures] = useState<FeeStructure[]>([
-    {
-      id: "1",
-      vehicleType: "Xe máy",
-      hourlyRate: 5000,
-      dailyRate: 30000,
-      monthlyRate: 500000,
-      description: "Áp dụng cho tất cả các loại xe máy",
-      lastUpdated: "2025-04-15",
-    },
-    {
-      id: "2",
-      vehicleType: "Ô tô 4-7 chỗ",
-      hourlyRate: 25000,
-      dailyRate: 150000,
-      monthlyRate: 2500000,
-      description: "Áp dụng cho xe ô tô 4-7 chỗ",
-      lastUpdated: "2025-04-15",
-    },
-    {
-      id: "3",
-      vehicleType: "Ô tô > 7 chỗ",
-      hourlyRate: 35000,
-      dailyRate: 200000,
-      monthlyRate: 3500000,
-      description: "Áp dụng cho xe ô tô trên 7 chỗ",
-      lastUpdated: "2025-04-15",
-    },
-  ])
-
+  const [feeStructures, setFeeStructures] = useState<FeeStructure[]>([])
   const [editingFee, setEditingFee] = useState<FeeStructure | null>(null)
+
+  // Fetch fee structures from API
+  const fetchFees = async () => {
+    const res = await api.getParkingConfig()
+    if (res.status === "success" && Array.isArray(res.config)) {
+      setFeeStructures(
+        res.config.map((item: any) => ({
+          id: item.id,
+          vehicleType: item.vehicle_type,
+          hourlyRate: item.price_per_hour,
+          maxCapacity: item.max_capacity,
+          createdAt: item.created_at || "",
+          updatedAt: item.updated_at || "",
+        })),
+      )
+    } else {
+      setFeeStructures([])
+    }
+  }
+
+  useEffect(() => {
+    fetchFees()
+  }, [])
 
   const handleEditFee = (fee: FeeStructure) => {
     setEditingFee({ ...fee })
   }
 
-  const handleSaveFee = () => {
+  const handleSaveFee = async () => {
     if (!editingFee) return
-
-    setFeeStructures((prev) =>
-      prev.map((fee) =>
-        fee.id === editingFee.id ? { ...editingFee, lastUpdated: new Date().toISOString().split("T")[0] } : fee,
-      ),
-    )
-
-    toast({
-      title: "Lưu thành công",
-      description: `Đã cập nhật phí dịch vụ cho ${editingFee.vehicleType}`,
+    const res = await api.updateParkingConfig(editingFee.id, {
+      // vehicle_type: editingFee.vehicleType, // not editable
+      max_capacity: editingFee.maxCapacity,
+      price_per_hour: editingFee.hourlyRate,
     })
-
-    setEditingFee(null)
+    if (res.status === "success") {
+      toast({
+        title: "Lưu thành công",
+        description: `Đã cập nhật phí dịch vụ cho ${getVehicleTypeLabel(editingFee.vehicleType)}`,
+      })
+      setEditingFee(null)
+      fetchFees()
+    } else {
+      toast({
+        title: "Lỗi",
+        description: res.message || "Không thể cập nhật phí dịch vụ",
+        variant: "destructive",
+      })
+    }
   }
 
   const handleCancelEdit = () => {
@@ -81,15 +87,10 @@ export default function ServiceFeesPage() {
   const handleInputChange = (field: keyof FeeStructure, value: string) => {
     if (!editingFee) return
 
-    if (field === "hourlyRate" || field === "dailyRate" || field === "monthlyRate") {
+    if (field === "hourlyRate" || field === "maxCapacity") {
       setEditingFee({
         ...editingFee,
         [field]: Number.parseInt(value) || 0,
-      })
-    } else {
-      setEditingFee({
-        ...editingFee,
-        [field]: value,
       })
     }
   }
@@ -115,18 +116,20 @@ export default function ServiceFeesPage() {
                 <TableRow>
                   <TableHead>Loại Phương Tiện</TableHead>
                   <TableHead className="text-right">Phí Giờ (VNĐ)</TableHead>
-                  <TableHead className="text-right">Phí Ngày (VNĐ)</TableHead>
-                  <TableHead className="text-right">Phí Tháng (VNĐ)</TableHead>
+                  <TableHead className="text-right">Sức chứa tối đa</TableHead>
+                  <TableHead className="text-right">Tạo lúc</TableHead>
+                  <TableHead className="text-right">Cập nhật lúc</TableHead>
                   <TableHead className="text-right">Thao Tác</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {feeStructures.map((fee) => (
                   <TableRow key={fee.id}>
-                    <TableCell className="font-medium">{fee.vehicleType}</TableCell>
+                    <TableCell className="font-medium">{getVehicleTypeLabel(fee.vehicleType)}</TableCell>
                     <TableCell className="text-right">{fee.hourlyRate.toLocaleString("vi-VN")}</TableCell>
-                    <TableCell className="text-right">{fee.dailyRate.toLocaleString("vi-VN")}</TableCell>
-                    <TableCell className="text-right">{fee.monthlyRate.toLocaleString("vi-VN")}</TableCell>
+                    <TableCell className="text-right">{fee.maxCapacity}</TableCell>
+                    <TableCell className="text-right">{fee.createdAt ? new Date(fee.createdAt).toLocaleString("vi-VN") : ""}</TableCell>
+                    <TableCell className="text-right">{fee.updatedAt ? new Date(fee.updatedAt).toLocaleString("vi-VN") : ""}</TableCell>
                     <TableCell className="text-right">
                       <Button variant="ghost" size="sm" onClick={() => handleEditFee(fee)}>
                         Chỉnh sửa
@@ -143,18 +146,17 @@ export default function ServiceFeesPage() {
           <Card>
             <CardHeader>
               <CardTitle>Chỉnh Sửa Phí Dịch Vụ</CardTitle>
-              <CardDescription>Cập nhật thông tin phí cho {editingFee.vehicleType}</CardDescription>
+              <CardDescription>Cập nhật thông tin phí cho {getVehicleTypeLabel(editingFee.vehicleType)}</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="vehicleType">Loại Phương Tiện</Label>
                 <Input
                   id="vehicleType"
-                  value={editingFee.vehicleType}
-                  onChange={(e) => handleInputChange("vehicleType", e.target.value)}
+                  value={getVehicleTypeLabel(editingFee.vehicleType)}
+                  disabled
                 />
               </div>
-
               <div className="space-y-2">
                 <Label htmlFor="hourlyRate" className="flex items-center">
                   <Clock className="mr-2 h-4 w-4" />
@@ -167,39 +169,32 @@ export default function ServiceFeesPage() {
                   onChange={(e) => handleInputChange("hourlyRate", e.target.value)}
                 />
               </div>
-
               <div className="space-y-2">
-                <Label htmlFor="dailyRate" className="flex items-center">
-                  <Calendar className="mr-2 h-4 w-4" />
-                  Phí Theo Ngày (VNĐ)
+                <Label htmlFor="maxCapacity" className="flex items-center">
+                  <Users className="mr-2 h-4 w-4" />
+                  Sức chứa tối đa
                 </Label>
                 <Input
-                  id="dailyRate"
+                  id="maxCapacity"
                   type="number"
-                  value={editingFee.dailyRate}
-                  onChange={(e) => handleInputChange("dailyRate", e.target.value)}
+                  value={editingFee.maxCapacity}
+                  onChange={(e) => handleInputChange("maxCapacity", e.target.value)}
                 />
               </div>
-
               <div className="space-y-2">
-                <Label htmlFor="monthlyRate" className="flex items-center">
-                  <Calendar className="mr-2 h-4 w-4" />
-                  Phí Theo Tháng (VNĐ)
-                </Label>
+                <Label htmlFor="createdAt">Tạo lúc</Label>
                 <Input
-                  id="monthlyRate"
-                  type="number"
-                  value={editingFee.monthlyRate}
-                  onChange={(e) => handleInputChange("monthlyRate", e.target.value)}
+                  id="createdAt"
+                  value={editingFee.createdAt ? new Date(editingFee.createdAt).toLocaleString("vi-VN") : ""}
+                  disabled
                 />
               </div>
-
               <div className="space-y-2">
-                <Label htmlFor="description">Mô Tả</Label>
+                <Label htmlFor="updatedAt">Cập nhật lúc</Label>
                 <Input
-                  id="description"
-                  value={editingFee.description}
-                  onChange={(e) => handleInputChange("description", e.target.value)}
+                  id="updatedAt"
+                  value={editingFee.updatedAt ? new Date(editingFee.updatedAt).toLocaleString("vi-VN") : ""}
+                  disabled
                 />
               </div>
             </CardContent>

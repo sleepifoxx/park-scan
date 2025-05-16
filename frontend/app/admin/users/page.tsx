@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
@@ -24,126 +24,147 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { MoreHorizontal, Search, UserPlus } from "lucide-react"
+import { MoreHorizontal, UserPlus } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
+import * as api from "@/api/api_backend"
 
-// Mock user data
-const initialUsers = [
-  {
-    id: "1",
-    name: "Nguyễn Văn A",
-    email: "admin@example.com",
-    role: "admin",
-    status: "active",
-    createdAt: "2025-01-15",
-  },
-  {
-    id: "2",
-    name: "Trần Thị B",
-    email: "user@example.com",
-    role: "user",
-    status: "active",
-    createdAt: "2025-02-20",
-  },
-  {
-    id: "3",
-    name: "Lê Văn C",
-    email: "levanc@example.com",
-    role: "user",
-    status: "inactive",
-    createdAt: "2025-03-10",
-  },
-  {
-    id: "4",
-    name: "Phạm Thị D",
-    email: "phamthid@example.com",
-    role: "user",
-    status: "active",
-    createdAt: "2025-04-05",
-  },
-  {
-    id: "5",
-    name: "Hoàng Văn E",
-    email: "hoangvane@example.com",
-    role: "user",
-    status: "active",
-    createdAt: "2025-04-15",
-  },
-]
-
-type User = (typeof initialUsers)[0]
+type User = {
+  username: string
+  email: string
+  role: string
+  is_active: boolean
+  created_at: string
+}
 
 export default function UsersPage() {
   const { toast } = useToast()
-  const [users, setUsers] = useState<User[]>(initialUsers)
-  const [searchQuery, setSearchQuery] = useState("")
+  const [users, setUsers] = useState<User[]>([])
   const [isAddUserOpen, setIsAddUserOpen] = useState(false)
+  const [isEditUserOpen, setIsEditUserOpen] = useState(false)
   const [newUser, setNewUser] = useState({
-    name: "",
+    username: "",
     email: "",
     role: "user",
     password: "",
   })
+  const [editUser, setEditUser] = useState<User | null>(null)
+  const [editUserForm, setEditUserForm] = useState({
+    password: "",
+    role: "",
+    is_active: true,
+  })
 
-  const filteredUsers = users.filter(
-    (user) =>
-      user.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.toLowerCase()),
-  )
-
-  const handleAddUser = () => {
-    const user = {
-      id: (users.length + 1).toString(),
-      name: newUser.name,
-      email: newUser.email,
-      role: newUser.role,
-      status: "active",
-      createdAt: new Date().toISOString().split("T")[0],
+  // Fetch users from API
+  const fetchUsers = async () => {
+    const res = await api.getAllUsers()
+    if (res.status === "success" && Array.isArray(res.users)) {
+      setUsers(res.users)
+    } else {
+      setUsers([])
     }
-    setUsers([...users, user])
-    setIsAddUserOpen(false)
-    setNewUser({
-      name: "",
-      email: "",
-      role: "user",
+  }
+
+  useEffect(() => {
+    fetchUsers()
+  }, [])
+
+  const handleAddUser = async () => {
+    const res = await api.createUser({
+      username: newUser.username,
+      email: newUser.email,
+      password: newUser.password,
+      role: newUser.role,
+    })
+    if (res.status === "success") {
+      toast({
+        title: "Thêm người dùng thành công",
+        description: `Đã thêm người dùng ${newUser.username} vào hệ thống`,
+      })
+      setIsAddUserOpen(false)
+      setNewUser({
+        username: "",
+        email: "",
+        role: "user",
+        password: "",
+      })
+      fetchUsers()
+    } else {
+      toast({
+        title: "Lỗi",
+        description: res.message || "Không thể thêm người dùng",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleDeleteUser = async (username: string) => {
+    const res = await api.deleteUser(username)
+    if (res.status === "success") {
+      toast({
+        title: "Xóa người dùng thành công",
+        description: `Đã xóa người dùng ${username} khỏi hệ thống`,
+      })
+      fetchUsers()
+    } else {
+      toast({
+        title: "Lỗi",
+        description: res.message || "Không thể xóa người dùng",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const handleToggleStatus = async (user: User) => {
+    const res = await api.modifyUserInfo(user.username, {
+      is_active: !user.is_active,
+    })
+    if (res.status === "success") {
+      toast({
+        title: "Cập nhật trạng thái thành công",
+        description: `Đã ${user.is_active ? "vô hiệu hóa" : "kích hoạt"} người dùng ${user.username}`,
+      })
+      fetchUsers()
+    } else {
+      toast({
+        title: "Lỗi",
+        description: res.message || "Không thể cập nhật trạng thái",
+        variant: "destructive",
+      })
+    }
+  }
+
+  const openEditUserDialog = (user: User) => {
+    setEditUser(user)
+    setEditUserForm({
       password: "",
+      role: user.role,
+      is_active: user.is_active,
     })
-
-    toast({
-      title: "Thêm người dùng thành công",
-      description: `Đã thêm người dùng ${user.name} vào hệ thống`,
-    })
+    setIsEditUserOpen(true)
   }
 
-  const handleDeleteUser = (id: string) => {
-    const userToDelete = users.find((user) => user.id === id)
-    setUsers(users.filter((user) => user.id !== id))
-
-    toast({
-      title: "Xóa người dùng thành công",
-      description: `Đã xóa người dùng ${userToDelete?.name} khỏi hệ thống`,
+  const handleEditUser = async () => {
+    if (!editUser) return
+    const res = await api.modifyUserInfo(editUser.username, {
+      password: editUserForm.password || undefined,
+      role: editUserForm.role,
+      is_active: editUserForm.is_active,
     })
-  }
-
-  const handleToggleStatus = (id: string) => {
-    setUsers(
-      users.map((user) =>
-        user.id === id
-          ? {
-              ...user,
-              status: user.status === "active" ? "inactive" : "active",
-            }
-          : user,
-      ),
-    )
-
-    const user = users.find((user) => user.id === id)
-    const newStatus = user?.status === "active" ? "vô hiệu hóa" : "kích hoạt"
-
-    toast({
-      title: "Cập nhật trạng thái thành công",
-      description: `Đã ${newStatus} người dùng ${user?.name}`,
-    })
+    if (res.status === "success") {
+      toast({
+        title: "Cập nhật thông tin thành công",
+        description: `Đã cập nhật thông tin cho người dùng ${editUser.username}`,
+      })
+      setIsEditUserOpen(false)
+      setEditUser(null)
+      fetchUsers()
+    } else {
+      toast({
+        title: "Lỗi",
+        description: res.message || "Không thể cập nhật thông tin",
+        variant: "destructive",
+      })
+    }
   }
 
   return (
@@ -164,11 +185,11 @@ export default function UsersPage() {
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="grid gap-2">
-                <Label htmlFor="name">Họ tên</Label>
+                <Label htmlFor="username">Tên đăng nhập</Label>
                 <Input
-                  id="name"
-                  value={newUser.name}
-                  onChange={(e) => setNewUser({ ...newUser, name: e.target.value })}
+                  id="username"
+                  value={newUser.username}
+                  onChange={(e) => setNewUser({ ...newUser, username: e.target.value })}
                 />
               </div>
               <div className="grid gap-2">
@@ -212,25 +233,11 @@ export default function UsersPage() {
         </Dialog>
       </div>
 
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-          <Input
-            type="search"
-            placeholder="Tìm kiếm người dùng..."
-            className="pl-8"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-          />
-        </div>
-      </div>
-
       <div className="rounded-md border">
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>ID</TableHead>
-              <TableHead>Họ tên</TableHead>
+              <TableHead>Tên đăng nhập</TableHead>
               <TableHead>Email</TableHead>
               <TableHead>Vai trò</TableHead>
               <TableHead>Trạng thái</TableHead>
@@ -239,17 +246,16 @@ export default function UsersPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filteredUsers.length === 0 ? (
+            {users.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center h-24">
+                <TableCell colSpan={6} className="text-center h-24">
                   Không tìm thấy người dùng nào
                 </TableCell>
               </TableRow>
             ) : (
-              filteredUsers.map((user) => (
-                <TableRow key={user.id}>
-                  <TableCell className="font-medium">{user.id}</TableCell>
-                  <TableCell>{user.name}</TableCell>
+              users.map((user) => (
+                <TableRow key={user.username}>
+                  <TableCell className="font-medium">{user.username}</TableCell>
                   <TableCell>{user.email}</TableCell>
                   <TableCell>
                     <Badge variant={user.role === "admin" ? "default" : "outline"}>
@@ -257,11 +263,11 @@ export default function UsersPage() {
                     </Badge>
                   </TableCell>
                   <TableCell>
-                    <Badge variant={user.status === "active" ? "success" : "secondary"}>
-                      {user.status === "active" ? "Hoạt động" : "Vô hiệu"}
+                    <Badge variant={user.is_active ? "success" : "secondary"}>
+                      {user.is_active ? "Hoạt động" : "Vô hiệu"}
                     </Badge>
                   </TableCell>
-                  <TableCell>{user.createdAt}</TableCell>
+                  <TableCell>{user.created_at}</TableCell>
                   <TableCell className="text-right">
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
@@ -273,11 +279,14 @@ export default function UsersPage() {
                       <DropdownMenuContent align="end">
                         <DropdownMenuLabel>Thao tác</DropdownMenuLabel>
                         <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={() => handleToggleStatus(user.id)}>
-                          {user.status === "active" ? "Vô hiệu hóa" : "Kích hoạt"}
+                        <DropdownMenuItem onClick={() => openEditUserDialog(user)}>
+                          Thay đổi thông tin
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleToggleStatus(user)}>
+                          {user.is_active ? "Vô hiệu hóa" : "Kích hoạt"}
                         </DropdownMenuItem>
                         <DropdownMenuItem
-                          onClick={() => handleDeleteUser(user.id)}
+                          onClick={() => handleDeleteUser(user.username)}
                           className="text-destructive focus:text-destructive"
                         >
                           Xóa người dùng
@@ -291,6 +300,68 @@ export default function UsersPage() {
           </TableBody>
         </Table>
       </div>
+
+      {/* Edit User Dialog */}
+      <Dialog open={isEditUserOpen} onOpenChange={setIsEditUserOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Thay đổi thông tin người dùng</DialogTitle>
+            <DialogDescription>
+              Cập nhật thông tin cho người dùng {editUser?.username}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="grid gap-2">
+              <Label htmlFor="edit-password">Mật khẩu mới</Label>
+              <Input
+                id="edit-password"
+                type="password"
+                value={editUserForm.password}
+                onChange={(e) => setEditUserForm({ ...editUserForm, password: e.target.value })}
+                placeholder="Để trống nếu không đổi"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-role">Vai trò</Label>
+              <Select
+                value={editUserForm.role}
+                onValueChange={(value) => setEditUserForm({ ...editUserForm, role: value })}
+              >
+                <SelectTrigger id="edit-role">
+                  <SelectValue placeholder="Chọn vai trò" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="admin">Quản trị viên</SelectItem>
+                  <SelectItem value="user">Người dùng</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="edit-status">Trạng thái</Label>
+              <Select
+                value={editUserForm.is_active ? "active" : "inactive"}
+                onValueChange={(value) =>
+                  setEditUserForm({ ...editUserForm, is_active: value === "active" })
+                }
+              >
+                <SelectTrigger id="edit-status">
+                  <SelectValue placeholder="Chọn trạng thái" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="active">Hoạt động</SelectItem>
+                  <SelectItem value="inactive">Vô hiệu</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsEditUserOpen(false)}>
+              Hủy
+            </Button>
+            <Button onClick={handleEditUser}>Lưu thay đổi</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
