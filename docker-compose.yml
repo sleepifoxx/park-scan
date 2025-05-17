@@ -2,28 +2,23 @@ version: '3.8'
 
 services:
   services:
-    build:
-      context: ./services
-      dockerfile: Dockerfile
+    image: sleepifoxx/services:latest
     ports:
       - "8001:8001"
 
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: sleepifoxx/backend:latest
     ports:
       - "8000:8000"
     depends_on:
       - services
     volumes:
-      - ./backend/database.db:/app/database.db
+      - ./backend/database:/app/database
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
+    image: sleepifoxx/frontend:latest
     ports:
-      - "3000:3000"
+      - "80:3000"
     depends_on:
       - services
+      - backend

@@ -107,10 +107,7 @@ export default function LoginPage() {
         </CardContent>
         <CardFooter className="flex justify-center border-t pt-4">
           <p className="text-sm text-muted-foreground">
-            Chưa có tài khoản hoặc quên mật khẩu?{" "}
-            <Link href="#" className="text-primary hover:underline">
-              Liên hệ quản trị viên
-            </Link>
+            Tài khoản admin: admin/password{" "}
           </p>
         </CardFooter>
       </Card>

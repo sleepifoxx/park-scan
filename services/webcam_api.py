@@ -131,7 +131,7 @@ class LicensePlateRecognizer:
                             self.latest_plate = plate
                             try:
                                 requests.post(
-                                    "http://localhost:8000/auto_check",
+                                    "http://backend:8000/auto_check",
                                     json={"license_plate": self.latest_plate}
                                 )
                             except Exception as e:
