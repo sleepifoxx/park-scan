@@ -11,6 +11,7 @@ import base64
 import datetime
 import asyncio
 from function import helper, utils_rotate
+import requests
 
 # ====== CONFIG ======
 
@@ -125,8 +126,17 @@ class LicensePlateRecognizer:
                 if self.counter:
                     plate, count = self.counter.most_common(1)[0]
                     if count >= self.cfg.min_detect_cnt and plate != 'unknown':
-                        self.latest_plate = plate
-                        self.history.append(plate)
+                        # Chỉ gửi auto_check nếu biển số mới khác với lần trước đã gửi
+                        if plate != self.latest_plate:
+                            self.latest_plate = plate
+                            try:
+                                requests.post(
+                                    "http://localhost:8000/auto_check",
+                                    json={"license_plate": self.latest_plate}
+                                )
+                            except Exception as e:
+                                print(f"Failed to call auto_check API: {e}")
+                            self.history.append(plate)
                 self.counter.clear()
                 self.current_plate = None
 

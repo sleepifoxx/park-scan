@@ -61,6 +61,16 @@ class LicensePlateInput(BaseModel):
     license_plate: str
 
 
+class ParkingSessionResult(BaseModel):
+    status: str
+    message: str
+    license_plate: str
+    vehicle_type: str
+    time_in: Optional[datetime] = None
+    time_out: Optional[datetime] = None
+    fee: Optional[float] = None
+
+
 # User Management APIs
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -294,13 +304,15 @@ async def checkin(db: AsyncSession, license_plate: str):
     )
     db.add(new_session)
     await db.commit()
-    return {
-        "status": StatusCode.SUCCESS,
-        "message": "Check-in thành công",
-        "license_plate": license_plate,
-        "vehicle_type": vehicle_type,
-        "time_in": new_session.time_in
-    }
+    return ParkingSessionResult(
+        status=StatusCode.SUCCESS,
+        message="Xe vào bãi thành công",
+        license_plate=license_plate,
+        vehicle_type=vehicle_type,
+        time_in=new_session.time_in,
+        time_out=None,
+        fee=None
+    )
 
 
 async def checkout(db: AsyncSession, session: ParkingSession):
@@ -319,18 +331,18 @@ async def checkout(db: AsyncSession, session: ParkingSession):
         session.fee = config.price_per_hour * duration
 
     await db.commit()
-    return {
-        "status": StatusCode.SUCCESS,
-        "message": "Check-out thành công",
-        "license_plate": session.license_plate,
-        "vehicle_type": session.vehicle_type,
-        "time_in": session.time_in,
-        "time_out": session.time_out,
-        "fee": session.fee
-    }
+    return ParkingSessionResult(
+        status=StatusCode.SUCCESS,
+        message="Xe ra khỏi bãi thành công",
+        license_plate=session.license_plate,
+        vehicle_type=session.vehicle_type,
+        time_in=session.time_in,
+        time_out=session.time_out,
+        fee=session.fee
+    )
 
 
-@app.post("/auto_check", tags=["Parking"])
+@app.post("/auto_check", response_model=ParkingSessionResult, tags=["Parking"])
 async def auto_check(data: LicensePlateInput, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(ParkingSession).filter(
         ParkingSession.license_plate == data.license_plate,

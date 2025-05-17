@@ -90,9 +90,6 @@ export default function LoginPage() {
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="password">Mật khẩu</Label>
-                <Link href="/forgot-password" className="text-sm text-primary hover:underline">
-                  Quên mật khẩu?
-                </Link>
               </div>
               <Input
                 id="password"
@@ -110,7 +107,7 @@ export default function LoginPage() {
         </CardContent>
         <CardFooter className="flex justify-center border-t pt-4">
           <p className="text-sm text-muted-foreground">
-            Chưa có tài khoản?{" "}
+            Chưa có tài khoản hoặc quên mật khẩu?{" "}
             <Link href="#" className="text-primary hover:underline">
               Liên hệ quản trị viên
             </Link>
