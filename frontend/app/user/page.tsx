@@ -70,7 +70,7 @@ export default function UserPage() {
             }
         };
         fetchPlate();
-        const interval = setInterval(fetchPlate, 2000);
+        const interval = setInterval(fetchPlate, 500);
         return () => {
             mounted = false;
             clearInterval(interval);
@@ -249,8 +249,15 @@ export default function UserPage() {
                     <CardHeader><CardTitle>Thông tin biển số</CardTitle></CardHeader>
                     <CardContent>
                         <div className="plate-display p-6 border rounded bg-gray-50 text-center mb-4">
-                            {isLoading ? <p>Loading...</p> : <h3 className="text-4xl font-bold">{plateInfo.plate}</h3>}
+                            {isLoading ? (
+                                <p>Loading...</p>
+                            ) : (
+                                <h3 className="text-4xl font-bold">
+                                    {plateInfo.plate === "No plate detected" ? "Chưa có biển số" : plateInfo.plate}
+                                </h3>
+                            )}
                         </div>
+
                         {/* Show parking session result */}
                         {autoCheckResult ? (
                             <div className="mt-4 p-4 rounded border bg-blue-50">

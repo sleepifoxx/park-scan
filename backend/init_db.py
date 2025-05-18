@@ -36,13 +36,13 @@ async def init_db():
                 id=1,
                 vehicle_type=VehicleType.CAR,
                 max_capacity=50,
-                price_per_hour=10.0
+                price_per_hour=50000.0
             )
             motorcycle_config = ParkingConfig(
                 id=2,
                 vehicle_type=VehicleType.MOTORCYCLE,
                 max_capacity=100,
-                price_per_hour=5.0
+                price_per_hour=5000.0
             )
 
             session.add(car_config)
@@ -50,9 +50,9 @@ async def init_db():
 
             await session.commit()
 
-        print("✅ Database created with admin user and default configs.")
+        print("Database created with admin user and default configs.")
     else:
-        print("✅ Database already exists. Skipping initialization.")
+        print("Database already exists. Skipping initialization.")
 
 if __name__ == "__main__":
     asyncio.run(init_db())
