@@ -87,7 +87,7 @@ Tải file tại [`docker-compose.yml (GPU)`](https://drive.google.com/file/d/10
 cd [Thư mục chứa docker-compose.yml]
 docker-compose up -d
 ```
-Hướng dẫn sử dụng website (vui lòng đọc kĩ trước khi sử dụng): [`Tài liệu hướng dẫn sử dụng`]() 
+Hướng dẫn sử dụng website (vui lòng đọc kĩ trước khi sử dụng): [`Tài liệu hướng dẫn sử dụng`](https://docs.google.com/document/d/1ymGymiakr4h8LvkABS8Gkz_vOr4H_qWaGI9pEBKEvmM/edit?usp=sharing) 
 
 Truy cập các phần của website:
 - **Website chính (Frontend)**: http://localhost
