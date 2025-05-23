@@ -6,6 +6,9 @@
 <h4 align="center">Hệ thống nhận diện biển số xe và quản lý bãi đỗ thông minh</h4>
 
 <p align="center">
+  <a href="https://github.com/sleepifoxx/park-scan">
+    <img src="https://img.shields.io/badge/GitHub-%23121011.svg?logo=github&logoColor=white">
+  </a>
   <a href="https://hub.docker.com/r/sleepifoxx/backend">
     <img src="https://img.shields.io/badge/backend-docker-blue?logo=docker">
   </a>
@@ -77,20 +80,22 @@ Tải file tại: [`docker-compose.yml`](https://drive.google.com/file/d/1D7Tcf5
 cd [Thư mục chứa docker-compose.yml]
 docker-compose up -d
 ```
+Hướng dẫn sử dụng website (nên đọc trước khi sử dụng): [`Tài liệu hướng dẫn sử dụng`]() 
 
-Truy cập các phần 
+Truy cập các phần của website:
 - **Backend API Documentation**: http://localhost:8000/docs
 - **Services (AI) API Documentation**: http://localhost:8001/docs
 - **Website chính (Frontend)**: http://localhost
 
 ---
 
-## Docker Hub
-
-- Backend: [sleepifoxx/backend](https://hub.docker.com/r/sleepifoxx/backend)
-- Services: [sleepifoxx/services](https://hub.docker.com/r/sleepifoxx/services)
-- Frontend: [sleepifoxx/frontend](https://hub.docker.com/r/sleepifoxx/frontend)
-
+## Link
+### a. DockerHub
+- Backend: [`sleepifoxx/backend`](https://hub.docker.com/r/sleepifoxx/backend)
+- Services: [`sleepifoxx/services`](https://hub.docker.com/r/sleepifoxx/services)
+- Frontend: [`sleepifoxx/frontend`](https://hub.docker.com/r/sleepifoxx/frontend)
+### b. GitHub
+- GitHub dự án: [`GitHub dự án`](https://github.com/sleepifoxx/park-scan)
 ---
 
 ## Cấu trúc dự án
