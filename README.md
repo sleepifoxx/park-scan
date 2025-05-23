@@ -34,7 +34,7 @@
 
 ## Mô tả dự án
 
-[`Truy cập thư mục Drive chung dự án`](https://drive.google.com/drive/folders/1da-UDeKuevoj0gaFQTeX-L56_8uN1YkI?usp=sharing)
+Muốn xem tài liệu chi tiết, vui lòng [`Truy cập thư mục Drive chung dự án`](https://drive.google.com/drive/folders/1da-UDeKuevoj0gaFQTeX-L56_8uN1YkI?usp=sharing)
 
 ### Tóm tắt chung
 
@@ -49,7 +49,7 @@ Các thành phần giao tiếp với nhau qua API và WebSocket, hỗ trợ tri�
 
 ## Tính năng
 
-- Nhận diện biển số xe thời gian thực bằng AI (YOLOv5 + OCR).
+- Nhận diện biển số xe thời gian thực bằng AI (YOLOv5).
 - Quản lý phiên gửi xe, cấu hình bãi đỗ, người dùng.
 - Giao diện web trực quan cho người dùng và quản trị viên.
 - Hỗ trợ xem camera trực tiếp hoặc luồng server.
@@ -64,16 +64,22 @@ Các thành phần giao tiếp với nhau qua API và WebSocket, hỗ trợ tri�
 
 - [Docker](https://www.docker.com/products/docker-desktop) và [Docker Compose](https://docs.docker.com/compose/).
 
-### 2. Clone dự án hoặc tải docker-compose.yml
+### 2. Tải docker-compose.yml
 
-#### a. Clone dự án
+#### a. docker-compose.yml cho CPU (`khuyên dùng`)
 
-```bash
-git clone https://github.com/sleepifoxx/park-scan.git
-```
+Tải file tại: [`docker-compose.yml (CPU)`](https://drive.google.com/file/d/1rZZQPijKJqN1nZomDq778mTEALTqXwAQ/view?usp=sharing)
+- **Chú ý**:
+  - Bản docker-compose.yml trên hỗ trợ cho cả **CPU** từ Intel (AMD64) và Apple Silicon (ARM64), có thể tải về và chạy hệ thống ngay lập tức. Bản này chính là bản được sử dụng tại `git` dự án.
 
-#### b. Hoặc tải docker-compose.yml  
-Tải file tại: [`docker-compose.yml`](https://drive.google.com/file/d/1D7Tcf5bOrvLEVL3_4mv9FzQB_Xj51Gj2/view?usp=sharing)
+#### b. docker-compose.yml cho GPU
+Tải file tại [`docker-compose.yml (GPU)`](https://drive.google.com/file/d/103uJEOW0FOY5q6XpoJ7pPcQoSS9wCm4F/view?usp=sharing)
+- **Chú ý**:
+  - Bản docker-compose.yml trên chỉ hỗ trợ cho **GPU Nvidia**, nếu  máy bạn có GPU Nvidia, hãy cấu hình Docker Desktop dựa trên [`hướng dẫn từ Docker`](https://docs.docker.com/desktop/features/gpu/), tải về docker-compose.yml này và sử dụng.
+  - Sự cấu hình này chỉ đến từ phía Docker Desktop máy của người dùng (không phải đến từ image dự án).
+  - Nếu máy bạn không có **GPU Nvidia**, xin hãy sử dụng bản cho **CPU** phía trên.
+  
+
 
 ### 3. Chạy hệ thống
 
@@ -81,12 +87,12 @@ Tải file tại: [`docker-compose.yml`](https://drive.google.com/file/d/1D7Tcf5
 cd [Thư mục chứa docker-compose.yml]
 docker-compose up -d
 ```
-Hướng dẫn sử dụng website (nên đọc trước khi sử dụng): [`Tài liệu hướng dẫn sử dụng`]() 
+Hướng dẫn sử dụng website (vui lòng đọc kĩ trước khi sử dụng): [`Tài liệu hướng dẫn sử dụng`]() 
 
 Truy cập các phần của website:
+- **Website chính (Frontend)**: http://localhost
 - **Backend API Documentation**: http://localhost:8000/docs
 - **Services (AI) API Documentation**: http://localhost:8001/docs
-- **Website chính (Frontend)**: http://localhost
 
 ---
 
