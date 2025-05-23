@@ -3,11 +3,13 @@ version: '3.8'
 services:
   services:
     image: sleepifoxx/services:latest
+    platform: linux/amd64
     ports:
       - "8001:8001"
 
   backend:
     image: sleepifoxx/backend:latest
+    platform: linux/amd64
     ports:
       - "8000:8000"
     depends_on:
@@ -17,6 +19,7 @@ services:
 
   frontend:
     image: sleepifoxx/frontend:latest
+    platform: linux/amd64
     ports:
       - "80:3000"
     depends_on:
