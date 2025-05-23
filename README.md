@@ -24,7 +24,7 @@
   <a href="#mô-tả-dự-án"> Mô tả dự án</a> •
   <a href="#tính-năng">Tính năng</a> •
   <a href="#hướng-dẫn-cài-đặt">Hướng dẫn cài đặt</a> •
-  <a href="#docker-hub">Docker Hub</a> •
+  <a href="#link">Link</a> •
   <a href="#cấu-trúc-dự-án">Cấu trúc dự án</a> •
   <a href="#đóng-góp">Đóng góp</a> •
   <a href="#thành-viên-phát-triển">Thành viên phát triển</a>
@@ -34,7 +34,7 @@
 
 ## Mô tả dự án
 
-[`Truy cập thư mục Drive tài liệu dự án`](https://drive.google.com/drive/folders/1da-UDeKuevoj0gaFQTeX-L56_8uN1YkI?usp=sharing)
+[`Truy cập thư mục Drive chung dự án`](https://drive.google.com/drive/folders/1da-UDeKuevoj0gaFQTeX-L56_8uN1YkI?usp=sharing)
 
 ### Tóm tắt chung
 
@@ -45,6 +45,7 @@ Park Scan là hệ thống nhận diện biển số xe tự động sử dụng
 
 Các thành phần giao tiếp với nhau qua API và WebSocket, hỗ trợ triển khai nhanh chóng bằng Docker.
 
+---
 
 ## Tính năng
 
