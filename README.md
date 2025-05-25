@@ -34,7 +34,7 @@
 
 ## Mô tả dự án
 
-Muốn xem tài liệu chi tiết, vui lòng [`Truy cập thư mục Drive chung dự án`](https://drive.google.com/drive/folders/1da-UDeKuevoj0gaFQTeX-L56_8uN1YkI?usp=sharing)
+Muốn xem tài liệu chi tiết, vui lòng [`Truy cập tài liệu thiết kế hệ thống`](https://drive.google.com/file/d/1E7E0ZEPqCKHVcN5el2At8CyP6jXpUy33/view?usp=sharing)
 
 ### Tóm tắt chung
 
@@ -87,10 +87,10 @@ Tải file tại [`docker-compose.yml (GPU)`](https://drive.google.com/file/d/10
 cd [Thư mục chứa docker-compose.yml]
 docker-compose up -d
 ```
-Hướng dẫn sử dụng website (vui lòng đọc kĩ trước khi sử dụng): [`Tài liệu hướng dẫn sử dụng`](https://docs.google.com/document/d/1ymGymiakr4h8LvkABS8Gkz_vOr4H_qWaGI9pEBKEvmM/edit?usp=sharing) 
+Hướng dẫn sử dụng website (vui lòng đọc kĩ trước khi sử dụng): [`Tài liệu hướng dẫn sử dụng`](https://drive.google.com/file/d/1M9pvrm3kPTKPk3OKw4duJOJoBaiGTGgi/view?usp=sharing) 
 
 Truy cập các phần của website:
-- **Website chính (Frontend)**: http://localhost
+- **Website chính (Frontend)**: http://localhost hoặc http://localhost:80
 - **Backend API Documentation**: http://localhost:8000/docs
 - **Services (AI) API Documentation**: http://localhost:8001/docs
 
