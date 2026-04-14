@@ -122,10 +122,10 @@ park-scan/
 ---
 
 ## Thành viên phát triển
-- Nguyễn Minh Quân
-- Vũ Văn Tới
-- Mai Phan Anh Tùng
-- Nguyễn Năng Thịnh
-- Nguyễn Văn Linh
+- Nguyễn Minh Quân.
+- Vũ Văn Tới.
+- Mai Phan Anh Tùng.
+- Nguyễn Năng Thịnh.
+- Nguyễn Văn Linh.
 ---
 > © 2025 Park Scan Team
